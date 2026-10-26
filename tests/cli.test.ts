@@ -1,0 +1,67 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { build } from 'esbuild';
+import { spawn } from 'node:child_process';
+import { mkdtemp, rm, mkdir, writeFile, copyFile, symlink, chmod } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { fixture } from './api-fixture';
+
+test('CLI gh-style lifecycle, JSON selection, stdin, files, attachments and shared edits', async () => {
+  const f = await fixture(), temp = await mkdtemp(join(tmpdir(), 'local-issues-cli-'));
+  const cli = join(temp, 'cli.mjs');
+  try {
+    await build({ entryPoints: [resolve('src/cli.ts')], outfile: cli, bundle: true, platform: 'node', format: 'esm', target: 'node22', logLevel: 'silent' });
+    await mkdir(join(f.vault, '.obsidian/plugins/local-issues'), { recursive: true });
+    await writeFile(join(f.vault, '.obsidian/plugins/local-issues/data.json'), JSON.stringify({ port: f.server.port, token: f.token }));
+    function run(args: string[], input?: string, config = true): Promise<{ code: number; stdout: string; stderr: string }> {
+      return new Promise((resolve, reject) => {
+        const child = spawn(process.execPath, [cli, ...(config ? ['--vault', f.vault] : []), ...args], { env: { ...process.env, LOCAL_ISSUES_TOKEN: '', LOCAL_ISSUES_URL: '' }, stdio: ['pipe', 'pipe', 'pipe'] });
+        let stdout = '', stderr = ''; child.stdout.on('data', x => stdout += x); child.stderr.on('data', x => stderr += x);
+        child.on('error', reject); child.on('close', code => resolve({ code: code ?? 1, stdout, stderr })); child.stdin.end(input);
+      });
+    }
+    async function json(args: string[], input?: string) { const r = await run([...args, '--json'], input); assert.equal(r.code, 0, r.stderr); return JSON.parse(r.stdout); }
+    const help = await run(['--help'], undefined, false); assert.equal(help.code, 0); assert.match(help.stdout, /issue comment/);
+    const project = await json(['project', 'create', '-t', 'CLI 项目', '-b', '说明']);
+    const installedCli = join(f.vault, '.obsidian/plugins/local-issues/cli.mjs');
+    await copyFile(cli, installedCli); await chmod(installedCli, 0o755);
+    const shortCommand = join(temp, 'li'); await symlink(installedCli, shortCommand);
+    const viaSymlink = await new Promise<{ code: number; stdout: string; stderr: string }>((resolve, reject) => {
+      const child = spawn(shortCommand, ['project', 'list', '--json'], { cwd: temp, env: { ...process.env, LOCAL_ISSUES_TOKEN: '', LOCAL_ISSUES_URL: '', LOCAL_ISSUES_VAULT: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
+      let stdout = '', stderr = ''; child.stdout.on('data', x => stdout += x); child.stderr.on('data', x => stderr += x); child.on('error', reject); child.on('close', code => resolve({ code: code ?? 1, stdout, stderr }));
+    });
+    assert.equal(viaSymlink.code, 0, viaSymlink.stderr); assert.equal(JSON.parse(viaSymlink.stdout)[0].id, project.id);
+    const created = await json(['issue', 'create', '-P', project.id, '-t', 'CLI Issue', '-l', 'bug,ux', '-F', '-'], '## 来自标准输入\n[[设计稿]]');
+    assert.deepEqual(created.labels, ['bug', 'ux']);
+    const one = await json(['issue', 'comment', '1', '-P', project.id, '-b', 'First comment']);
+    assert.equal(one.author, 'Agent');
+    await json(['comment', 'edit', one.id, '-b', 'Edited comment']);
+    await json(['issue', 'close', '1', '-P', project.id]);
+    await json(['issue', 'reopen', '1', '-P', project.id]);
+    const selected = await run(['issue', 'view', '1', '-P', project.id, '--json', 'number,title,comments']);
+    assert.equal(selected.code, 0, selected.stderr);
+    assert.deepEqual(Object.keys(JSON.parse(selected.stdout)), ['number', 'title', 'comments']);
+    assert.equal(JSON.parse(selected.stdout).comments[0].body, 'Edited comment');
+    const list = await json(['issue', 'list', '-P', 'CLI 项目', '--label', 'bug', '--state', 'all']); assert.equal(list.length, 1);
+    await json(['issue', 'edit', created.id, '--add-label', 'new', '--remove-label', 'ux']);
+    assert.deepEqual((await f.store.getIssue(created.id)).labels, ['bug', 'new']);
+    const attachment = join(temp, 'image.png'); await writeFile(attachment, Buffer.from([137, 80, 78, 71]));
+    const attached = await json(['issue', 'attach', created.id, attachment]); assert.match(attached.markdown, /^!\[\[/);
+    assert.equal((await f.store.snapshot()).timeline.filter(t => t.kind === 'comment').length, 2);
+    const share = await json(['issue', 'share', created.id]);
+    const fromShare = await run(['share', 'view', share.url, '--json'], undefined, false); assert.equal(fromShare.code, 0, fromShare.stderr); assert.equal(JSON.parse(fromShare.stdout).id, created.id);
+    const shareEdit = await run(['share', 'edit', share.url, '-t', 'Edited via shared link'], undefined, false); assert.equal(shareEdit.code, 0, shareEdit.stderr);
+    assert.equal((await f.store.getIssue(created.id)).title, 'Edited via shared link');
+    const shareComment = await run(['issue', 'comment', share.url, '-b', 'Shared comment'], undefined, false); assert.equal(shareComment.code, 0, shareComment.stderr);
+    const shareCommentEdit = await run(['share', 'comment-edit', share.url, one.id, '-b', 'Edited through share'], undefined, false); assert.equal(shareCommentEdit.code, 0, shareCommentEdit.stderr);
+    assert.equal((await f.store.snapshot()).timeline.find(t => t.id === one.id)?.body, 'Edited through share');
+    const resolved = await json(['resolve', `[[${created.path.replace(/\.md$/, '')}|Alias]]`]); assert.equal(resolved.id, created.id);
+    const apiCreate = await json(['api', 'issues', '-f', `project=${project.id}`, '-f', 'title=JSON fields', '-f', 'labels=["a","b"]']); assert.deepEqual(apiCreate.labels, ['a', 'b']);
+    const bad = await run(['issue', 'edit', created.id, '-t', 'Should not apply', '--if-match', 'stale']); assert.equal(bad.code, 1); assert.match(bad.stderr, /CONFLICT/);
+    const invalid = await run(['issue', 'list', '--mystery']); assert.equal(invalid.code, 1); assert.match(invalid.stderr, /未知选项/);
+    const projectShare = await json(['project', 'share', project.id]);
+    assert.equal((await run(['share', 'edit', projectShare.url, '-b', 'Shared project description'], undefined, false)).code, 0);
+    assert.equal((await f.store.getProject(project.id)).description, 'Shared project description');
+  } finally { await f.close(); await rm(temp, { recursive: true, force: true }); }
+});

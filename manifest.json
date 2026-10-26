@@ -1,0 +1,10 @@
+{
+  "id": "local-issues",
+  "name": "Local Issues",
+  "version": "0.1.2",
+  "minAppVersion": "1.14.4",
+  "description": "Manage local Markdown projects, issues, boards, comments and attachments, with an optional API and agent CLI.",
+  "author": "Evan",
+  "isDesktopOnly": true,
+  "authorUrl": "https://github.com/xinxinrana"
+}
