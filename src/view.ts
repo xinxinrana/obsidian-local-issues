@@ -2,7 +2,7 @@ import { Component, ItemView, MarkdownRenderer, Modal, Notice, Menu, setIcon, Wo
 import { ISSUE_STATUSES, STATUS_NAMES, issueLink, Issue, IssueInput, IssuePatch, IssueStore, Project, ProjectStatus, Snapshot, TimelineEntry } from './types';
 
 export const VIEW_TYPE = 'local-issues-view';
-export interface ViewHost { store: IssueStore; author: string; openNote(path: string): Promise<void>; agentCommand(ref: string): Promise<string>; openSettings(): void; }
+export interface ViewHost { store: IssueStore; author: string; openNote(path: string): Promise<void>; resourceLink(ref?: string, scope?: 'issues'): Promise<string>; openSettings(): void; }
 const PROJECT_STATES: ProjectStatus[] = ['active', 'paused', 'completed', 'archived'];
 const el = <K extends keyof HTMLElementTagNameMap>(parent: HTMLElement, tag: K, cls = '', text = ''): HTMLElementTagNameMap[K] => { const node = document.createElement(tag); node.className = cls; if (text) node.textContent = text; parent.append(node); return node; };
 const action = (parent: HTMLElement, text: string, run: () => void, cls = '') => { const b = el(parent, 'button', cls, text); b.type = 'button'; b.addEventListener('click', run); return b; };
@@ -74,7 +74,7 @@ export class IssuesView extends ItemView {
     return node;
   }
   private renderProjects(root: HTMLElement) {
-    const head = el(root, 'div', 'li-heading'); el(head, 'h2', '', '项目'); el(head, 'span', 'li-muted', `${this.data.projects.length} 个项目`); const actions = el(head, 'div', 'li-heading-actions'); action(actions, '+ 新建项目', () => this.projectModal(), 'mod-cta');
+    const head = el(root, 'div', 'li-heading'); el(head, 'h2', '', '项目'); el(head, 'span', 'li-muted', `${this.data.projects.length} 个项目`); const actions = el(head, 'div', 'li-heading-actions'); action(actions, '复制仓库链接', () => safe(async () => { await navigator.clipboard.writeText(await this.host.resourceLink()); new Notice('已复制仓库链接'); })); action(actions, '+ 新建项目', () => this.projectModal(), 'mod-cta');
     const searchRow = el(root, 'div', 'li-search-row'); const search = input(searchRow, '搜索项目', this.query); search.setAttribute('aria-label', '搜索项目'); search.addEventListener('change', () => { this.query = search.value; safe(() => this.draw()); }); search.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); this.query = search.value; safe(() => this.draw()); } });
     const tools = el(root, 'div', 'li-toolbar');
     select(tools, [['', '所有状态'], ...PROJECT_STATES.map(s => [s, STATUS_NAMES[s]] as [string, string])], this.state, value => { this.state = value; safe(() => this.draw()); });
@@ -100,7 +100,15 @@ export class IssuesView extends ItemView {
     this.moreButton(actions, [
       ['编辑项目', () => this.projectModal(project)],
       ['打开笔记', () => safe(() => this.host.openNote(project.path))],
-      ['分享给 Agent', () => safe(async () => { await navigator.clipboard.writeText(await this.host.agentCommand(project.id)); new Notice('已复制项目 Agent 命令'); })],
+      ['分享给 Agent', () => safe(async () => { await navigator.clipboard.writeText(await this.host.resourceLink(project.id)); new Notice('已复制项目链接'); })],
+      ['复制 Issues 列表链接', () => safe(async () => {
+        const url = new URL(await this.host.resourceLink(project.id, 'issues'));
+        if (this.state) url.searchParams.set('state', this.state);
+        if (this.query) url.searchParams.set('search', this.query);
+        if (this.label) url.searchParams.set('label', this.label);
+        if (this.milestone) url.searchParams.set('milestone', this.milestone);
+        await navigator.clipboard.writeText(decodeURI(url.toString())); new Notice('已复制 Issues 列表链接');
+      })],
     ], '项目更多操作');
     action(actions, '+ 新建 Issue', () => this.issueModal(project), 'mod-cta');
     if (project.description) this.markdown(root, project.description, project.path);
@@ -146,7 +154,7 @@ export class IssuesView extends ItemView {
     this.moreButton(controls, [
       ['打开笔记', () => safe(() => this.host.openNote(issue.path))],
       ['复制双链', () => safe(async () => { await navigator.clipboard.writeText(issueLink(issue)); new Notice('已复制双链'); })],
-      ['分享给 Agent', () => safe(async () => { await navigator.clipboard.writeText(await this.host.agentCommand(issue.id)); new Notice('已复制 Agent 命令，粘贴给 Agent 即可'); })],
+      ['分享给 Agent', () => safe(async () => { await navigator.clipboard.writeText(await this.host.resourceLink(issue.id)); new Notice('已复制议题链接'); })],
     ], 'Issue 更多操作');
     const summary = el(root, 'div', 'li-issue-summary'); pill(summary, issue.status); el(summary, 'span', 'li-muted', `${issue.author} 创建于 ${date(issue.createdAt)} · ${this.data.timeline.filter(e => e.issueId === issue.id && e.kind === 'comment').length} 条评论`);
     const detail = el(root, 'div', 'li-detail'); const main = el(detail, 'div', 'li-detail-main'); const sidebar = el(detail, 'aside', 'li-sidebar');

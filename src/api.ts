@@ -1,19 +1,17 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
+import { ResourceRoutes, parseResource, slug } from './routes';
 import type { Issue, IssuePatch, IssueStore, ProjectPatch, Resolved, Snapshot } from './types';
 
-export interface Share { ref: string; key: string }
+export interface Share { ref: string }
 export interface ApiOptions {
-  store: IssueStore; port: number; token: string; vaultName: string;
+  store: IssueStore; port: number; vaultName: string;
   shares: Record<string, Share>; saveShares: () => Promise<void>;
+  routes?: ResourceRoutes;
   open?: (ref: string) => Promise<void>;
 }
 const MAX_BODY = 24 * 1024 * 1024;
 class HttpError extends Error { constructor(public status: number, message: string, public code = 'INVALID_REQUEST') { super(message); } }
-function equal(a: string, b: string): boolean {
-  const x = Buffer.from(a), y = Buffer.from(b);
-  return x.length === y.length && timingSafeEqual(x, y);
-}
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new HttpError(400, '请求正文必须是 JSON 对象。');
   return value as Record<string, unknown>;
@@ -63,7 +61,17 @@ function filteredIssues(snapshot: Snapshot, query: URLSearchParams, projectId?: 
   const state = query.get('state') ?? query.get('status');
   if (state && state !== 'all') result = result.filter(i => i.status === state || (state === 'open' && i.status === 'in-progress'));
   const q = (query.get('search') ?? query.get('q') ?? '').toLocaleLowerCase();
-  if (q) result = result.filter(i => `${i.title}\n${i.body}\n${i.labels.join(' ')}\n${i.number}\n${snapshot.timeline.filter(t => t.issueId === i.id && t.kind === 'comment').map(t => t.body).join('\n')}`.toLocaleLowerCase().includes(q));
+  if (q) result = result.filter(i => {
+    const text = `${i.title}\n${i.body}\n${i.labels.join(' ')}\n${i.number}\n${snapshot.timeline.filter(t => t.issueId === i.id && t.kind === 'comment').map(t => t.body).join('\n')}`.toLocaleLowerCase();
+    return (q.match(/(?:[^\s"]+|"[^"]*")+/g) ?? []).every(token => {
+      const [key, ...parts] = token.split(':'), value = parts.join(':').replace(/^"|"$/g, '');
+      if (key === 'state' || key === 'is') return value === 'open' ? i.status !== 'closed' : i.status === value;
+      if (key === 'label') return i.labels.some(x => x.toLocaleLowerCase() === value);
+      if (key === 'milestone') return i.milestone.toLocaleLowerCase() === value;
+      if (key === 'assignee') return i.assignees.some(x => x.toLocaleLowerCase() === value);
+      return text.includes(token.replace(/^"|"$/g, ''));
+    });
+  });
   for (const label of query.getAll('label')) result = result.filter(i => i.labels.includes(label));
   if (query.has('milestone')) result = result.filter(i => i.milestone === query.get('milestone'));
   for (const assignee of query.getAll('assignee')) result = result.filter(i => i.assignees.includes(assignee));
@@ -74,8 +82,8 @@ function filteredIssues(snapshot: Snapshot, query: URLSearchParams, projectId?: 
 }
 
 export async function startApi(options: ApiOptions): Promise<{ close: () => Promise<void>; port: number }> {
-  if (!options.token || options.token.length < 16) throw new Error('API token 必须至少有 16 个字符。');
   const { store } = options;
+  const routes = options.routes ?? new ResourceRoutes(slug(options.vaultName));
   let actualPort = options.port;
   async function detail(ref: string, project?: string): Promise<Record<string, unknown>> {
     return issueDetail(await store.getIssue(ref, project), await store.snapshot());
@@ -101,20 +109,30 @@ export async function startApi(options: ApiOptions): Promise<{ close: () => Prom
     void (async () => {
       const host = req.headers.host ?? '';
       if (!/^(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/i.test(host)) throw new HttpError(403, '只接受本机地址。', 'FORBIDDEN');
-      if (req.headers.origin) throw new HttpError(403, '此接口仅供本机 CLI 和 Agent 使用。', 'FORBIDDEN');
+      if (req.headers.origin || (req.headers['sec-fetch-site'] && req.headers['sec-fetch-site'] !== 'none')) throw new HttpError(403, '此接口仅供本机 CLI 和 Agent 使用。', 'FORBIDDEN');
       const url = new URL(req.url ?? '/', `http://127.0.0.1:${actualPort}`);
-      const parts = url.pathname.split('/').filter(Boolean).map(x => { try { return decodeURIComponent(x); } catch { throw new HttpError(400, '地址编码不正确。'); } });
+      let parts = url.pathname.split('/').filter(Boolean).map(x => { try { return decodeURIComponent(x); } catch { throw new HttpError(400, '地址编码不正确。'); } });
       const method = req.method ?? 'GET';
-      if (method === 'GET' && url.pathname === '/api/health') { send(res, 200, { ok: true, data: { name: 'Local Issues', version: '0.1.2' } }); return; }
-      const authenticated = equal(req.headers.authorization ?? '', `Bearer ${options.token}`);
+      if (method === 'GET' && url.pathname === '/api/health') { send(res, 200, { ok: true, data: { name: 'Local Issues', version: '0.1.4' } }); return; }
       const shared = parts[0] === 'api' && parts[1] === 'shares' && !!parts[2];
-      if (!authenticated && !shared) throw new HttpError(401, '需要本地 API token；请使用 li --vault <笔记库路径>。', 'UNAUTHORIZED');
+      const resource = parseResource(url);
+      if (resource) {
+        const path = await routes.translate(store, resource);
+        if (!path) {
+          if (method !== 'GET') throw new HttpError(405, '仓库入口仅支持读取。', 'METHOD_NOT_ALLOWED');
+          const projects = await routes.sync(store);
+          send(res, 200, { ok: true, data: { kind: 'repo', name: options.vaultName, slug: routes.repo, projects } }); return;
+        }
+        const translated = new URL(path, url);
+        for (const [key, value] of translated.searchParams) url.searchParams.set(key, value);
+        parts = translated.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+      }
       if (parts[0] !== 'api') throw new HttpError(404, '接口不存在。', 'NOT_FOUND');
       let data: unknown;
       let status = 200;
       if (shared) {
         const share = Object.hasOwn(options.shares, parts[2]) ? options.shares[parts[2]] : undefined;
-        if (!share || (!authenticated && !equal(url.searchParams.get('key') ?? '', share.key))) throw new HttpError(403, '分享链接不存在或密钥不正确。', 'FORBIDDEN');
+        if (!share) throw new HttpError(404, '旧分享链接不存在。', 'NOT_FOUND');
         const resolved = await store.resolve(share.ref);
         if (resolved.kind === 'note') throw new HttpError(403, '分享仅支持项目和 Issue。', 'FORBIDDEN');
         if (parts.length <= 4 && (!parts[3] || parts[3] === 'resolve')) {
@@ -132,6 +150,9 @@ export async function startApi(options: ApiOptions): Promise<{ close: () => Prom
           if (!entry) throw new HttpError(403, '此评论不属于分享的 Issue。', 'FORBIDDEN');
           const body = await readBody(req); data = await store.editComment(entry.id, str(body.body, 'body'), expected(req, body));
         } else throw new HttpError(404, '分享接口不存在。', 'NOT_FOUND');
+      } else if (parts[1] === 'links' && parts.length === 2 && method === 'GET') {
+        const path = await routes.path(store, url.searchParams.get('ref') ?? undefined, url.searchParams.get('scope') === 'issues' ? 'issues' : undefined);
+        data = { url: `http://127.0.0.1:${actualPort}${decodeURI(path)}` };
       } else if (parts[1] === 'projects') {
         if (parts.length === 2 && method === 'GET') {
           const snap = await store.snapshot();
@@ -180,10 +201,10 @@ export async function startApi(options: ApiOptions): Promise<{ close: () => Prom
       } else if (parts[1] === 'shares' && parts.length === 2 && method === 'POST') {
         const body = await readBody(req), resolved = await store.resolve(str(body.ref, 'ref'));
         if (resolved.kind === 'note') throw new HttpError(400, '分享入口只支持项目或 Issue。');
-        const id = `s-${randomBytes(12).toString('hex')}`, key = randomBytes(24).toString('hex');
-        options.shares[id] = { ref: resolved.value.id, key };
+        const id = `s-${randomBytes(12).toString('hex')}`;
+        options.shares[id] = { ref: resolved.value.id };
         try { await options.saveShares(); } catch (e) { delete options.shares[id]; throw e; }
-        data = { id, url: `http://127.0.0.1:${actualPort}/api/shares/${id}/resolve?key=${key}`, ref: resolved.value.id }; status = 201;
+        data = { id, url: `http://127.0.0.1:${actualPort}/api/shares/${id}/resolve`, ref: resolved.value.id }; status = 201;
       } else throw new HttpError(404, '接口不存在。', 'NOT_FOUND');
       send(res, status, { ok: true, data });
     })().catch((error: unknown) => {

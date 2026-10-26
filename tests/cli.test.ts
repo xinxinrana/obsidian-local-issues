@@ -13,7 +13,7 @@ test('CLI gh-style lifecycle, JSON selection, stdin, files, attachments and shar
   try {
     await build({ entryPoints: [resolve('src/cli.ts')], outfile: cli, bundle: true, platform: 'node', format: 'esm', target: 'node22', logLevel: 'silent' });
     await mkdir(join(f.vault, '.obsidian/plugins/local-issues'), { recursive: true });
-    await writeFile(join(f.vault, '.obsidian/plugins/local-issues/data.json'), JSON.stringify({ port: f.server.port, token: f.token }));
+    await writeFile(join(f.vault, '.obsidian/plugins/local-issues/data.json'), JSON.stringify({ port: f.server.port }));
     function run(args: string[], input?: string, config = true): Promise<{ code: number; stdout: string; stderr: string }> {
       return new Promise((resolve, reject) => {
         const child = spawn(process.execPath, [cli, ...(config ? ['--vault', f.vault] : []), ...args], { env: { ...process.env, LOCAL_ISSUES_TOKEN: '', LOCAL_ISSUES_URL: '', LOCAL_ISSUES_VAULT: '' }, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -49,7 +49,7 @@ test('CLI gh-style lifecycle, JSON selection, stdin, files, attachments and shar
     const attachment = join(temp, 'image.png'); await writeFile(attachment, Buffer.from([137, 80, 78, 71]));
     const attached = await json(['issue', 'attach', created.id, attachment]); assert.match(attached.markdown, /^!\[\[/);
     assert.equal((await f.store.snapshot()).timeline.filter(t => t.kind === 'comment').length, 2);
-    const share = await json(['issue', 'share', created.id]);
+    const share = (await f.request('/api/shares', 'POST', { ref: created.id })).data;
     const fromShare = await run(['share', 'view', share.url, '--json'], undefined, false); assert.equal(fromShare.code, 0, fromShare.stderr); assert.equal(JSON.parse(fromShare.stdout).id, created.id);
     const shareEdit = await run(['share', 'edit', share.url, '-t', 'Edited via shared link'], undefined, false); assert.equal(shareEdit.code, 0, shareEdit.stderr);
     assert.equal((await f.store.getIssue(created.id)).title, 'Edited via shared link');
@@ -74,13 +74,35 @@ test('CLI gh-style lifecycle, JSON selection, stdin, files, attachments and shar
     assert.equal((await f.store.getIssue(created.id)).status, 'open');
     const tampered = new URL(share.url); tampered.searchParams.set('key', 'invalid');
     const denied = await run(['issue', 'view', tampered.toString()], undefined, false);
-    assert.equal(denied.code, 1); assert.match(denied.stderr, /FORBIDDEN/);
+    assert.equal(denied.code, 0, denied.stderr);
     assert.equal((await run(['issue', 'view', share.url, '--web'], undefined, false)).code, 1);
     const resolved = await json(['resolve', `[[${created.path.replace(/\.md$/, '')}|Alias]]`]); assert.equal(resolved.id, created.id);
     const apiCreate = await json(['api', 'issues', '-f', `project=${project.id}`, '-f', 'title=JSON fields', '-f', 'labels=["a","b"]']); assert.deepEqual(apiCreate.labels, ['a', 'b']);
     const bad = await run(['issue', 'edit', created.id, '-t', 'Should not apply', '--if-match', 'stale']); assert.equal(bad.code, 1); assert.match(bad.stderr, /CONFLICT/);
     const invalid = await run(['issue', 'list', '--mystery']); assert.equal(invalid.code, 1); assert.match(invalid.stderr, /未知选项/);
-    const projectShare = await json(['project', 'share', project.id]);
+    const resourceLink = await json(['issue', 'share', created.id]);
+    assert.match(resourceLink.url, /\/repos\/tests\/projects\/cli-项目\/issues\/1$/);
+    assert.equal(new URL(resourceLink.url).search, '');
+    const resourceView = await json(['view', resourceLink.url]); assert.equal(resourceView.id, created.id);
+    const resourceNoAuth = await run(['view', resourceLink.url, '--json'], undefined, false);
+    assert.equal(resourceNoAuth.code, 0, resourceNoAuth.stderr); assert.equal(JSON.parse(resourceNoAuth.stdout).id, created.id);
+    const resourceEdit = await json(['issue', 'edit', resourceLink.url, '-t', 'Semantic issue']); assert.equal(resourceEdit.title, 'Semantic issue');
+    await json(['issue', 'comment', resourceLink.url, '-b', 'Semantic comment']);
+    await json(['issue', 'close', resourceLink.url]);
+    await json(['issue', 'reopen', resourceLink.url]);
+    const resourceProject = await json(['project', 'share', project.id]);
+    assert.equal((await json(['project', 'view', resourceProject.url])).id, project.id);
+    const listUrl = resourceProject.url + '/issues?state=open&label=bug';
+    assert.deepEqual((await json(['view', listUrl])).map((i: any) => i.id), [created.id]);
+    assert.equal((await json(['issue', 'list', listUrl]))[0].id, created.id);
+    const repoUrl = await json(['repo', 'link']);
+    assert.equal((await json(['view', repoUrl.url])).kind, 'repo');
+    assert.equal((await json(['repo', 'view', repoUrl.url])).projects[0].id, project.id);
+    assert.equal((await run(['project', 'view', resourceLink.url])).code, 1);
+    assert.equal((await run(['issue', 'view', listUrl])).code, 1);
+    const wrongOrigin = resourceLink.url.replace('127.0.0.1', 'localhost');
+    assert.match((await run(['view', wrongOrigin])).stderr, /同一本机服务/);
+    const projectShare = (await f.request('/api/shares', 'POST', { ref: project.id })).data;
     assert.equal((await run(['share', 'edit', projectShare.url, '-b', 'Shared project description'], undefined, false)).code, 0);
     assert.equal((await f.store.getProject(project.id)).description, 'Shared project description');
     const sharedProject = await run(['project', 'view', projectShare.url, '--json'], undefined, false);

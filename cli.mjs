@@ -24,6 +24,20 @@ SOFTWARE.
 
 */
 
+// src/routes.ts
+function parseResource(url) {
+  const p = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+  if (p[0] !== "repos") return void 0;
+  if (!p[1] || url.username || url.password || url.hash) throw new Error("\u4ED3\u5E93\u94FE\u63A5\u683C\u5F0F\u4E0D\u6B63\u786E\u3002");
+  if (p.length === 2) return { kind: "repo", repo: p[1], suffix: [] };
+  if (p[2] !== "projects" || !p[3]) throw new Error("\u9879\u76EE\u94FE\u63A5\u683C\u5F0F\u4E0D\u6B63\u786E\u3002");
+  if (p.length === 4) return { kind: "project", repo: p[1], project: p[3], suffix: [] };
+  if (p[4] !== "issues") throw new Error("\u8BAE\u9898\u94FE\u63A5\u683C\u5F0F\u4E0D\u6B63\u786E\u3002");
+  if (p.length === 5) return { kind: "issues", repo: p[1], project: p[3], suffix: [] };
+  if (!/^[1-9]\d*$/.test(p[5]) || !Number.isSafeInteger(Number(p[5]))) throw new Error("\u8BAE\u9898\u7F16\u53F7\u5FC5\u987B\u662F\u6B63\u6574\u6570\u3002");
+  return { kind: "issue", repo: p[1], project: p[3], number: Number(p[5]), suffix: p.slice(6) };
+}
+
 // src/cli.ts
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { resolve, dirname, basename } from "node:path";
@@ -31,6 +45,8 @@ var HELP = `Local Issues \xB7 Obsidian \u672C\u5730\u9879\u76EE\u4E0E Issues
 
 \u7528\u6CD5: li <\u547D\u4EE4> [\u53C2\u6570] [\u9009\u9879]
 
+  view <\u8BED\u4E49\u5316URL>
+  repo view <\u4ED3\u5E93URL> | link
   project list | view <\u9879\u76EE> | create | edit <\u9879\u76EE> | share <\u9879\u76EE>
   issue list | view <\u7F16\u53F7/\u53CC\u94FE/ID/\u5206\u4EABURL> | create | edit <\u5F15\u7528>
   issue comment <\u5F15\u7528> | close <\u5F15\u7528> | reopen <\u5F15\u7528>
@@ -71,7 +87,7 @@ var HELP = `Local Issues \xB7 Obsidian \u672C\u5730\u9879\u76EE\u4E0E Issues
   li issue share '[[Local Issues/\u9879\u76EE/issues/0001]]'
 
 \u9700\u8981\u5728 Obsidian \u4E2D\u542F\u7528 Local Issues \u548C\u672C\u5730 API\u3002API \u53EA\u76D1\u542C\u672C\u673A\u3002
-\u5206\u4EAB\u94FE\u63A5\u5141\u8BB8\u6301\u6709\u8005\u8BFB\u53D6\u3001\u4FEE\u6539\u76EE\u6807\uFF0C\u4F9B\u672C\u673A Agent \u4F7F\u7528\u3002`;
+\u8BED\u4E49\u5316\u94FE\u63A5\u4EC5\u5B9A\u4F4D\u8D44\u6E90\uFF0C\u65E0\u9700\u767B\u5F55\u6216\u5BC6\u94A5\uFF1B\u65E7\u5206\u4EAB\u94FE\u63A5\u7EE7\u7EED\u517C\u5BB9\u3002`;
 var aliases = { c: "comments", P: "project", t: "title", b: "body", F: "body-file", l: "label", a: "assignee", s: "state", S: "search", L: "limit", h: "help", X: "method", f: "field", H: "header" };
 var booleans = /* @__PURE__ */ new Set(["help", "web", "comment", "comments"]);
 var multiples = /* @__PURE__ */ new Set(["label", "assignee", "depends-on", "add-label", "remove-label", "field", "header"]);
@@ -137,22 +153,19 @@ function localUrl(value) {
   if (url.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) || url.username || url.password) throw new Error("\u4EC5\u652F\u6301 http://127.0.0.1 \u7684\u672C\u673A\u63A5\u53E3\u4E0E\u5206\u4EAB\u94FE\u63A5\u3002");
   return url;
 }
-function client(f, shared) {
+function client(f, shared, resource) {
   let base = val(f, "url") ?? (process.env.LOCAL_ISSUES_URL || void 0);
-  let token = process.env.LOCAL_ISSUES_TOKEN || void 0;
   const vault = findVault(val(f, "vault") ?? process.env.LOCAL_ISSUES_VAULT);
   if (!shared && vault) {
     const file = resolve(vault, ".obsidian/plugins/local-issues/data.json");
     if (existsSync(file)) {
       const config = JSON.parse(readFileSync(file, "utf8"));
       base ??= `http://127.0.0.1:${config.apiPort ?? config.port ?? 27183}`;
-      token ??= config.apiToken ?? config.token;
     }
   }
-  if (!shared && !token) throw new Error("\u672A\u627E\u5230 Local Issues API \u8BBE\u7F6E\u3002\u8BF7\u7528 --vault <\u7B14\u8BB0\u5E93\u8DEF\u5F84>\uFF0C\u5E76\u5728 Obsidian \u4E2D\u542F\u7528\u63D2\u4EF6\u3002");
+  base ??= resource?.origin;
   const baseUrl = shared ?? localUrl(base ?? "http://127.0.0.1:27183");
   const headers = { "Content-Type": "application/json" };
-  if (!shared && token) headers.Authorization = `Bearer ${token}`;
   const match = val(f, "if-match");
   if (match) headers["If-Match"] = match;
   for (const header of list(f, "header") ?? []) {
@@ -252,18 +265,40 @@ async function main() {
     console.log(HELP);
     return;
   }
-  const [command, action, ref, extra] = args;
+  let [command, action, ref, extra] = args;
+  if (command === "view" || command === "resolve" && action?.startsWith("http://")) {
+    ref = action;
+    action = "view";
+  }
+  const resourceUrl = ref?.startsWith("http://") ? localUrl(ref) : void 0;
+  const resource = resourceUrl ? parseResource(resourceUrl) : void 0;
+  if (resource) {
+    if (resource.suffix.length) throw new Error("\u8BF7\u4F7F\u7528\u4ED3\u5E93\u3001\u9879\u76EE\u3001Issues \u5217\u8868\u6216\u8BAE\u9898\u94FE\u63A5\u3002");
+    if (command === "view" || command === "resolve" || command === "share") {
+      command = resource.kind === "repo" ? "repo" : resource.kind === "project" ? "project" : "issue";
+      if (resource.kind === "issues" && action === "view") action = "list";
+    }
+    const expected = resource.kind === "repo" ? "repo" : resource.kind === "project" ? "project" : "issue";
+    if (command !== expected || (resource.kind === "issues" ? action !== "list" : action === "list" || action === "create")) throw new Error("\u547D\u4EE4\u4E0E\u94FE\u63A5\u76EE\u6807\u4E0D\u5339\u914D\uFF1B\u4F7F\u7528 li view <\u94FE\u63A5> \u81EA\u52A8\u8BC6\u522B\u76EE\u6807\u3002");
+  }
   let shared;
   const maybe = ["share", "issue", "project"].includes(command) ? ref : void 0;
-  if (maybe?.startsWith("http://")) {
+  if (!resource && maybe?.startsWith("http://")) {
     const parsed = localUrl(maybe);
-    if (/^\/api\/shares\/[^/]+\/resolve$/.test(parsed.pathname) && parsed.searchParams.get("key")) shared = parsed;
+    if (/^\/api\/shares\/[^/]+\/resolve$/.test(parsed.pathname)) shared = parsed;
     else throw new Error("\u8BF7\u63D0\u4F9B\u5B8C\u6574\u7684\u5206\u4EAB\u94FE\u63A5\u3002");
   }
-  const api = client(flags, shared);
+  const api = client(flags, shared, resource ? resourceUrl : void 0);
   const project = val(flags, "project");
-  const issuePath = (value) => `/api/issues/${encodeURIComponent(value)}${project ? `?project=${encodeURIComponent(project)}` : ""}`;
-  const subPath = (value, suffix) => `/api/issues/${encodeURIComponent(value)}/${suffix}${project ? `?project=${encodeURIComponent(project)}` : ""}`;
+  const issuePath = (value) => resourceUrl && resource ? resourceUrl.toString() : `/api/issues/${encodeURIComponent(value)}${project ? `?project=${encodeURIComponent(project)}` : ""}`;
+  const subPath = (value, suffix) => {
+    if (resourceUrl && resource) {
+      const url = new URL(resourceUrl);
+      url.pathname += `/${suffix}`;
+      return url.toString();
+    }
+    return `/api/issues/${encodeURIComponent(value)}/${suffix}${project ? `?project=${encodeURIComponent(project)}` : ""}`;
+  };
   let data;
   if (shared) {
     const url = new URL(shared);
@@ -292,13 +327,17 @@ async function main() {
       url.pathname = url.pathname.replace(/\/resolve$/, `/comments/${encodeURIComponent(required(extra, "\u8BC4\u8BBAID"))}`);
       data = await api.request(url.pathname + url.search, "PATCH", { body: required(body(flags), "\u8BC4\u8BBA\u6B63\u6587\uFF08--body \u6216 --body-file\uFF09") });
     } else throw new Error("\u5206\u4EAB\u94FE\u63A5\u652F\u6301 view\u3001edit\u3001comment\u3001comment-edit\u3001close\u3001reopen\u3002");
+  } else if (command === "repo") {
+    if (action === "view" && resourceUrl && resource?.kind === "repo") data = await api.request(resourceUrl.toString());
+    else if (action === "link") data = await api.request("/api/links");
+    else throw new Error("\u7528\u6CD5\uFF1Ali repo view <\u4ED3\u5E93URL> \u6216 li repo link");
   } else if (command === "project") {
     if (action === "list") {
       const query = new URLSearchParams();
       if (val(flags, "state")) query.set("state", val(flags, "state"));
       if (val(flags, "search")) query.set("search", val(flags, "search"));
       data = await api.request(`/api/projects?${query}`);
-    } else if (action === "view") data = await api.request(`/api/projects/${encodeURIComponent(required(ref, "\u9879\u76EE"))}`);
+    } else if (action === "view") data = await api.request(resourceUrl && resource ? resourceUrl.toString() : `/api/projects/${encodeURIComponent(required(ref, "\u9879\u76EE"))}`);
     else if (action === "create" || action === "edit") {
       const value = {};
       if (val(flags, "title") !== void 0) value.title = val(flags, "title");
@@ -307,17 +346,19 @@ async function main() {
       if (val(flags, "state") ?? val(flags, "status")) value.status = val(flags, "state") ?? val(flags, "status");
       if (val(flags, "due-date") !== void 0) value.dueDate = val(flags, "due-date");
       if (action === "create") required(value.title, "\u6807\u9898\uFF08--title\uFF09");
-      data = await api.request(action === "create" ? "/api/projects" : `/api/projects/${encodeURIComponent(required(ref, "\u9879\u76EE"))}`, action === "create" ? "POST" : "PATCH", value);
-    } else if (action === "share") data = await api.request("/api/shares", "POST", { ref: required(ref, "\u9879\u76EE") });
+      data = await api.request(action === "create" ? "/api/projects" : resourceUrl && resource ? resourceUrl.toString() : `/api/projects/${encodeURIComponent(required(ref, "\u9879\u76EE"))}`, action === "create" ? "POST" : "PATCH", value);
+    } else if (action === "share") data = resourceUrl && resource ? { url: resourceUrl.toString() } : await api.request(`/api/links?ref=${encodeURIComponent(required(ref, "\u9879\u76EE"))}`);
     else throw new Error("\u672A\u77E5\u9879\u76EE\u547D\u4EE4\u3002\u8FD0\u884C li --help \u67E5\u770B\u7528\u6CD5\u3002");
   } else if (command === "issue") {
     if (action === "list") {
-      const query = new URLSearchParams({ state: val(flags, "state") ?? val(flags, "status") ?? "open", limit: val(flags, "limit") ?? "30" });
+      const query = new URLSearchParams(resourceUrl && resource ? resourceUrl.search : "");
+      query.set("state", val(flags, "state") ?? val(flags, "status") ?? query.get("state") ?? (resource ? "all" : "open"));
+      query.set("limit", val(flags, "limit") ?? query.get("limit") ?? "30");
       if (project) query.set("project", project);
       for (const key of ["search", "milestone"]) if (val(flags, key) !== void 0) query.set(key, val(flags, key));
       for (const label of list(flags, "label") ?? []) query.append("label", label);
       for (const name of list(flags, "assignee") ?? []) query.append("assignee", name);
-      data = await api.request(`/api/issues?${query}`);
+      data = await api.request(resourceUrl && resource ? `${resourceUrl.origin}${resourceUrl.pathname}?${query}` : `/api/issues?${query}`);
     } else if (action === "view") data = await api.request(issuePath(required(ref, "Issue \u5F15\u7528")));
     else if (action === "create") data = await api.request("/api/issues", "POST", { ...issuePatch(flags), title: required(val(flags, "title"), "\u6807\u9898\uFF08--title\uFF09"), project: required(project, "\u9879\u76EE\uFF08--project\uFF09"), author: val(flags, "author") ?? "Agent" });
     else if (action === "edit") {
@@ -339,7 +380,7 @@ async function main() {
       data = attachment;
     } else if (action === "share") {
       const current = await api.request(issuePath(required(ref, "Issue \u5F15\u7528")));
-      data = await api.request("/api/shares", "POST", { ref: current.issue.id });
+      data = await api.request(`/api/links?ref=${encodeURIComponent(current.issue.id)}`);
     } else throw new Error("\u672A\u77E5 Issue \u547D\u4EE4\u3002\u8FD0\u884C li --help \u67E5\u770B\u7528\u6CD5\u3002");
   } else if (command === "comment" && action === "edit") data = await api.request(`/api/comments/${encodeURIComponent(required(ref, "\u8BC4\u8BBA ID"))}`, "PATCH", { body: required(body(flags), "\u8BC4\u8BBA\u6B63\u6587\uFF08--body \u6216 --body-file\uFF09") });
   else if (command === "resolve") data = await api.request(`/api/resolve?ref=${encodeURIComponent(required(action, "\u53CC\u94FE\u6216\u5F15\u7528"))}`);
@@ -361,7 +402,7 @@ async function main() {
     data = await api.request(path, method, method === "GET" ? void 0 : fields);
   } else throw new Error("\u672A\u77E5\u547D\u4EE4\u3002\u8FD0\u884C li --help \u67E5\u770B\u7528\u6CD5\u3002");
   if (flags.web && !shared) {
-    const target = data?.issue?.id ?? data?.project?.id ?? data?.id ?? ref;
+    const target = data?.kind === "repo" ? void 0 : data?.issue?.id ?? data?.project?.id ?? data?.id ?? ref;
     if (target) await api.request("/api/open", "POST", { ref: target });
   }
   if (flags.json !== void 0 && data?.issue) data = { ...data.issue, project: data.project, comments: data.comments, timeline: data.timeline, subIssues: data.subIssues, dependencies: data.dependencies };

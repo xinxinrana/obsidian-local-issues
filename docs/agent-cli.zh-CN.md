@@ -1,47 +1,51 @@
-# Local Issues：Agent 交付与 CLI
+# Local Issues：链接与 CLI
 
-## 交付方式
+分享内容是一条语义化链接。人通过路径看懂目标，agent 通过 CLI 读取和操作。无需登录、token 或分享密钥。
 
-项目或议题「更多 → 分享给 Agent」复制一条可直接运行的命令：
+| 链接路径 | 指向 |
+| --- | --- |
+| `/repos/obsidian` | 当前笔记库，即本地仓库 |
+| `/repos/obsidian/projects/local-issues` | 一个项目 |
+| `/repos/obsidian/projects/local-issues/issues` | 项目的议题列表 |
+| `/repos/obsidian/projects/local-issues/issues?state=open&label=bug` | 项目内未关闭、标签为 bug 的议题 |
+| `/repos/obsidian/projects/local-issues/issues/5` | 项目内第 5 条议题 |
+
+完整地址以 `http://127.0.0.1:27183` 开头。`obsidian` 来自笔记库名称，`local-issues` 来自项目名称；中文名称保留中文，重名时添加数字后缀。项目链接名首次生成后固定，修改项目标题仍可访问原链接。
+
+## 复制链接
+
+- 项目首页：复制仓库链接。
+- 项目「更多 → 分享给 Agent」：复制项目链接。
+- 项目「更多 → 复制 Issues 列表链接」：复制列表链接，保留当前状态、搜索、标签、里程碑筛选。
+- 议题「更多 → 分享给 Agent」：复制该议题链接。
+
+链接只定位资源，不嵌入命令、文件路径、密钥或 API 内部路由。
+
+## Agent 使用
+
+在 Obsidian 中启用 Local Issues 的本地 API。CLI 需要 Node.js 22 或以上；安装 `cli.mjs` 后，可使用已配置的 `li` 命令，也可用 `node '/路径/cli.mjs'` 代替 `li`。
 
 ```sh
-node '/笔记库/.obsidian/plugins/local-issues/cli.mjs' issue view '<分享引用>' --json
+li view '<任意资源链接>' --json
+li repo view 'http://127.0.0.1:27183/repos/obsidian' --json
+li project view 'http://127.0.0.1:27183/repos/obsidian/projects/local-issues' --json
+li issue list 'http://127.0.0.1:27183/repos/obsidian/projects/local-issues/issues?state=open' --json
+li issue view 'http://127.0.0.1:27183/repos/obsidian/projects/local-issues/issues/5' --json
 ```
 
-项目使用 `project view`。把这一条命令交给 agent 即可；agent 通过 CLI 读取内容，沿用同一个引用完成后续操作。命令包含 CLI 绝对路径，不依赖预先安装 `li`。未安装 `cli.mjs` 时，插件提示从 Release 下载。
-
-## 命令约定
-
-以下 `li` 代表交付命令中的 `node '/绝对路径/cli.mjs'`：
+`li view` 自动识别仓库、项目、列表或议题。修改、评论、关闭沿用同一议题链接：
 
 ```sh
-li issue view '<引用>' --json number,title,body,comments,revision
-li issue view '<引用>' --comments
-li issue edit '<引用>' --body-file description.md --if-match '<revision>'
-li issue edit '<引用>' --add-label feature --remove-label bug
-li issue comment '<引用>' --body-file reply.md
-li issue close '<引用>'
-li issue reopen '<引用>'
-li project view '<项目引用>' --json
-li project edit '<项目引用>' --body '项目说明'
+li issue edit '<议题链接>' --body-file description.md --if-match '<revision>'
+li issue comment '<议题链接>' --body-file reply.md
+li issue close '<议题链接>'
+li issue reopen '<议题链接>'
 ```
 
-正文支持 `--body`、`--body-file <文件>`、`--body-file -`（标准输入）。普通输出默认显示正文，`--comments` / `-c` 显示评论与状态时间线；JSON 通过字段选择控制输出。读取 `revision` 后，修改时传入 `--if-match` 可检测并发冲突。
+`--json number,title,body,comments,revision` 选择字段；`--comments` 显示评论与状态时间线；`--body-file -` 从标准输入读取正文。读取 revision 后使用 `--if-match` 可检测并发覆盖。
 
-本地已授权 CLI 还支持项目内编号（配合 `-P`）、稳定 ID 和 Obsidian 双链。旧分享引用和 `li share ...` 命令继续有效。
+服务仅监听本机，拒绝浏览器跨域请求。链接本身不授予额外权限；本机 CLI 可操作当前库。旧分享链接继续兼容，但不再需要其中的 key。Obsidian 双链用于笔记关联，资源链接用于跨工具定位。
 
-## 权限范围
+## 参考
 
-分享引用仅在运行 Obsidian 的本机有效，携带目标的读写权限，不需要整库 API token。议题分享只允许操作该议题及其评论；项目分享可读取项目及议题列表、修改项目，修改具体议题应使用议题分享。撤销分享后，原引用失效。不要公开含密钥的实际引用。
-
-`--web` 只用于本地编号或 ID；agent 交付通过 CLI 获取 JSON。Obsidian 双链用于笔记间关联，CLI 分享引用用于授权访问。
-
-## 设计依据
-
-沿用 GitHub CLI 的「对象 + 动作 + 编号或 URL + 选项」结构，减少 agent 学习成本与交付文字：
-
-- [gh issue view](https://cli.github.com/manual/gh_issue_view)：编号或 URL、评论、JSON。
-- [gh issue edit](https://cli.github.com/manual/gh_issue_edit)：URL 引用、正文文件、标签。
-- [gh issue comment](https://cli.github.com/manual/gh_issue_comment)：同一引用下发表评论。
-
-保留现有分享凭据和权限边界，交付内容只包含一条入口命令。
+沿用 GitHub CLI 的对象、动作、编号或 URL 和选项结构：[gh issue view](https://cli.github.com/manual/gh_issue_view)、[gh issue edit](https://cli.github.com/manual/gh_issue_edit)、[gh issue comment](https://cli.github.com/manual/gh_issue_comment)。

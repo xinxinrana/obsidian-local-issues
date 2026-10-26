@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { parseResource } from './routes';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { resolve, dirname, basename } from 'node:path';
 
@@ -7,6 +8,8 @@ const HELP = `Local Issues · Obsidian 本地项目与 Issues
 
 用法: li <命令> [参数] [选项]
 
+  view <语义化URL>
+  repo view <仓库URL> | link
   project list | view <项目> | create | edit <项目> | share <项目>
   issue list | view <编号/双链/ID/分享URL> | create | edit <引用>
   issue comment <引用> | close <引用> | reopen <引用>
@@ -47,7 +50,7 @@ const HELP = `Local Issues · Obsidian 本地项目与 Issues
   li issue share '[[Local Issues/项目/issues/0001]]'
 
 需要在 Obsidian 中启用 Local Issues 和本地 API。API 只监听本机。
-分享链接允许持有者读取、修改目标，供本机 Agent 使用。`;
+语义化链接仅定位资源，无需登录或密钥；旧分享链接继续兼容。`;
 
 const aliases: Record<string, string> = { c: 'comments', P: 'project', t: 'title', b: 'body', F: 'body-file', l: 'label', a: 'assignee', s: 'state', S: 'search', L: 'limit', h: 'help', X: 'method', f: 'field', H: 'header' };
 const booleans = new Set(['help', 'web', 'comment', 'comments']);
@@ -101,22 +104,19 @@ function localUrl(value: string): URL {
   return url;
 }
 interface Client { request(path: string, method?: string, value?: unknown): Promise<any> }
-function client(f: Flags, shared?: URL): Client {
+function client(f: Flags, shared?: URL, resource?: URL): Client {
   let base = val(f, 'url') ?? (process.env.LOCAL_ISSUES_URL || undefined);
-  let token = process.env.LOCAL_ISSUES_TOKEN || undefined;
   const vault = findVault(val(f, 'vault') ?? process.env.LOCAL_ISSUES_VAULT);
   if (!shared && vault) {
     const file = resolve(vault, '.obsidian/plugins/local-issues/data.json');
     if (existsSync(file)) {
       const config = JSON.parse(readFileSync(file, 'utf8'));
       base ??= `http://127.0.0.1:${config.apiPort ?? config.port ?? 27183}`;
-      token ??= config.apiToken ?? config.token;
     }
   }
-  if (!shared && !token) throw new Error('未找到 Local Issues API 设置。请用 --vault <笔记库路径>，并在 Obsidian 中启用插件。');
+  base ??= resource?.origin;
   const baseUrl = shared ?? localUrl(base ?? 'http://127.0.0.1:27183');
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (!shared && token) headers.Authorization = `Bearer ${token}`;
   const match = val(f, 'if-match'); if (match) headers['If-Match'] = match;
   for (const header of list(f, 'header') ?? []) { const colon = header.indexOf(':'); if (colon <= 0) throw new Error('-H 格式为 Name: value'); headers[header.slice(0, colon)] = header.slice(colon + 1).trim(); }
   return { async request(path, method = 'GET', value) {
@@ -167,14 +167,29 @@ function issuePatch(f: Flags): Record<string, unknown> {
 async function main(): Promise<void> {
   const { args, flags } = parse(process.argv.slice(2));
   if (flags.help || !args.length || args[0] === 'help') { console.log(HELP); return; }
-  const [command, action, ref, extra] = args;
+  let [command, action, ref, extra] = args;
+  if (command === 'view' || (command === 'resolve' && action?.startsWith('http://'))) { ref = action; action = 'view'; }
+  const resourceUrl = ref?.startsWith('http://') ? localUrl(ref) : undefined;
+  const resource = resourceUrl ? parseResource(resourceUrl) : undefined;
+  if (resource) {
+    if (resource.suffix.length) throw new Error('请使用仓库、项目、Issues 列表或议题链接。');
+    if (command === 'view' || command === 'resolve' || command === 'share') {
+      command = resource.kind === 'repo' ? 'repo' : resource.kind === 'project' ? 'project' : 'issue';
+      if (resource.kind === 'issues' && action === 'view') action = 'list';
+    }
+    const expected = resource.kind === 'repo' ? 'repo' : resource.kind === 'project' ? 'project' : 'issue';
+    if (command !== expected || (resource.kind === 'issues' ? action !== 'list' : action === 'list' || action === 'create')) throw new Error('命令与链接目标不匹配；使用 li view <链接> 自动识别目标。');
+  }
   let shared: URL | undefined;
   const maybe = ['share', 'issue', 'project'].includes(command) ? ref : undefined;
-  if (maybe?.startsWith('http://')) { const parsed = localUrl(maybe); if (/^\/api\/shares\/[^/]+\/resolve$/.test(parsed.pathname) && parsed.searchParams.get('key')) shared = parsed; else throw new Error('请提供完整的分享链接。'); }
-  const api = client(flags, shared);
+  if (!resource && maybe?.startsWith('http://')) { const parsed = localUrl(maybe); if (/^\/api\/shares\/[^/]+\/resolve$/.test(parsed.pathname)) shared = parsed; else throw new Error('请提供完整的分享链接。'); }
+  const api = client(flags, shared, resource ? resourceUrl : undefined);
   const project = val(flags, 'project');
-  const issuePath = (value: string) => `/api/issues/${encodeURIComponent(value)}${project ? `?project=${encodeURIComponent(project)}` : ''}`;
-  const subPath = (value: string, suffix: string) => `/api/issues/${encodeURIComponent(value)}/${suffix}${project ? `?project=${encodeURIComponent(project)}` : ''}`;
+  const issuePath = (value: string) => resourceUrl && resource ? resourceUrl.toString() : `/api/issues/${encodeURIComponent(value)}${project ? `?project=${encodeURIComponent(project)}` : ''}`;
+  const subPath = (value: string, suffix: string) => {
+    if (resourceUrl && resource) { const url = new URL(resourceUrl); url.pathname += `/${suffix}`; return url.toString(); }
+    return `/api/issues/${encodeURIComponent(value)}/${suffix}${project ? `?project=${encodeURIComponent(project)}` : ''}`;
+  };
   let data: any;
   if (shared) {
     const url = new URL(shared);
@@ -194,11 +209,15 @@ async function main(): Promise<void> {
     else if (action === 'comment') { url.pathname = url.pathname.replace(/\/resolve$/, '/comments'); data = await api.request(url.pathname + url.search, 'POST', { body: required(body(flags), '评论正文（--body 或 --body-file）'), author: val(flags, 'author') ?? 'Agent' }); }
     else if (action === 'comment-edit') { url.pathname = url.pathname.replace(/\/resolve$/, `/comments/${encodeURIComponent(required(extra, '评论ID'))}`); data = await api.request(url.pathname + url.search, 'PATCH', { body: required(body(flags), '评论正文（--body 或 --body-file）') }); }
     else throw new Error('分享链接支持 view、edit、comment、comment-edit、close、reopen。');
+  } else if (command === 'repo') {
+    if (action === 'view' && resourceUrl && resource?.kind === 'repo') data = await api.request(resourceUrl.toString());
+    else if (action === 'link') data = await api.request('/api/links');
+    else throw new Error('用法：li repo view <仓库URL> 或 li repo link');
   } else if (command === 'project') {
     if (action === 'list') {
       const query = new URLSearchParams(); if (val(flags, 'state')) query.set('state', val(flags, 'state')!); if (val(flags, 'search')) query.set('search', val(flags, 'search')!);
       data = await api.request(`/api/projects?${query}`);
-    } else if (action === 'view') data = await api.request(`/api/projects/${encodeURIComponent(required(ref, '项目'))}`);
+    } else if (action === 'view') data = await api.request(resourceUrl && resource ? resourceUrl.toString() : `/api/projects/${encodeURIComponent(required(ref, '项目'))}`);
     else if (action === 'create' || action === 'edit') {
       const value: Record<string, unknown> = {};
       if (val(flags, 'title') !== undefined) value.title = val(flags, 'title');
@@ -206,17 +225,19 @@ async function main(): Promise<void> {
       if (val(flags, 'state') ?? val(flags, 'status')) value.status = val(flags, 'state') ?? val(flags, 'status');
       if (val(flags, 'due-date') !== undefined) value.dueDate = val(flags, 'due-date');
       if (action === 'create') required(value.title as string, '标题（--title）');
-      data = await api.request(action === 'create' ? '/api/projects' : `/api/projects/${encodeURIComponent(required(ref, '项目'))}`, action === 'create' ? 'POST' : 'PATCH', value);
-    } else if (action === 'share') data = await api.request('/api/shares', 'POST', { ref: required(ref, '项目') });
+      data = await api.request(action === 'create' ? '/api/projects' : resourceUrl && resource ? resourceUrl.toString() : `/api/projects/${encodeURIComponent(required(ref, '项目'))}`, action === 'create' ? 'POST' : 'PATCH', value);
+    } else if (action === 'share') data = resourceUrl && resource ? { url: resourceUrl.toString() } : await api.request(`/api/links?ref=${encodeURIComponent(required(ref, '项目'))}`);
     else throw new Error('未知项目命令。运行 li --help 查看用法。');
   } else if (command === 'issue') {
     if (action === 'list') {
-      const query = new URLSearchParams({ state: val(flags, 'state') ?? val(flags, 'status') ?? 'open', limit: val(flags, 'limit') ?? '30' });
+      const query = new URLSearchParams(resourceUrl && resource ? resourceUrl.search : '');
+      query.set('state', val(flags, 'state') ?? val(flags, 'status') ?? query.get('state') ?? (resource ? 'all' : 'open'));
+      query.set('limit', val(flags, 'limit') ?? query.get('limit') ?? '30');
       if (project) query.set('project', project);
       for (const key of ['search', 'milestone']) if (val(flags, key) !== undefined) query.set(key, val(flags, key)!);
       for (const label of list(flags, 'label') ?? []) query.append('label', label);
       for (const name of list(flags, 'assignee') ?? []) query.append('assignee', name);
-      data = await api.request(`/api/issues?${query}`);
+      data = await api.request(resourceUrl && resource ? `${resourceUrl.origin}${resourceUrl.pathname}?${query}` : `/api/issues?${query}`);
     } else if (action === 'view') data = await api.request(issuePath(required(ref, 'Issue 引用')));
     else if (action === 'create') data = await api.request('/api/issues', 'POST', { ...issuePatch(flags), title: required(val(flags, 'title'), '标题（--title）'), project: required(project, '项目（--project）'), author: val(flags, 'author') ?? 'Agent' });
     else if (action === 'edit') {
@@ -234,7 +255,7 @@ async function main(): Promise<void> {
       const attachment = await api.request(subPath(required(ref, 'Issue 引用'), 'attachments'), 'POST', { name: basename(file), base64: readFileSync(file).toString('base64') });
       await api.request(subPath(ref!, 'comments'), 'POST', { body: [body(flags), attachment.markdown].filter(Boolean).join('\n\n'), author: val(flags, 'author') ?? 'Agent' });
       data = attachment;
-    } else if (action === 'share') { const current = await api.request(issuePath(required(ref, 'Issue 引用'))); data = await api.request('/api/shares', 'POST', { ref: current.issue.id }); }
+    } else if (action === 'share') { const current = await api.request(issuePath(required(ref, 'Issue 引用'))); data = await api.request(`/api/links?ref=${encodeURIComponent(current.issue.id)}`); }
     else throw new Error('未知 Issue 命令。运行 li --help 查看用法。');
   } else if (command === 'comment' && action === 'edit') data = await api.request(`/api/comments/${encodeURIComponent(required(ref, '评论 ID'))}`, 'PATCH', { body: required(body(flags), '评论正文（--body 或 --body-file）') });
   else if (command === 'resolve') data = await api.request(`/api/resolve?ref=${encodeURIComponent(required(action, '双链或引用'))}`);
@@ -246,7 +267,7 @@ async function main(): Promise<void> {
     data = await api.request(path, method, method === 'GET' ? undefined : fields);
   } else throw new Error('未知命令。运行 li --help 查看用法。');
   if (flags.web && !shared) {
-    const target = data?.issue?.id ?? data?.project?.id ?? data?.id ?? ref;
+    const target = data?.kind === 'repo' ? undefined : data?.issue?.id ?? data?.project?.id ?? data?.id ?? ref;
     if (target) await api.request('/api/open', 'POST', { ref: target });
   }
   if (flags.json !== undefined && data?.issue) data = { ...data.issue, project: data.project, comments: data.comments, timeline: data.timeline, subIssues: data.subIssues, dependencies: data.dependencies };

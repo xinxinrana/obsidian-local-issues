@@ -34,7 +34,7 @@ test('bundled plugin registers native entry points; Vault adapter, protocol, API
   const leaves: any[] = [], openedNotes: string[] = [];
   let plugin: any;
   const app: any = {
-    vault, metadataCache: { getFirstLinkpathDest: () => null }, savedData: { port: 0, apiEnabled: true },
+    vault, metadataCache: { getFirstLinkpathDest: () => null }, savedData: { port: 0, apiEnabled: true, token: 'legacy-token', shares: { old: { ref: 'legacy', key: 'legacy-secret' } } },
     workspace: {
       onLayoutReady() {}, getActiveFile: () => null,
       getLeavesOfType: () => leaves,
@@ -59,7 +59,7 @@ test('bundled plugin registers native entry points; Vault adapter, protocol, API
     assert.ok(plugin.views.has('local-issues-view'));
     assert.ok(plugin.protocols.has('local-issues'));
     assert.ok(plugin.commands.some((c: any) => c.id === 'open-projects'));
-    assert.ok(app.savedData.token.length >= 32);
+    assert.equal(app.savedData.token, undefined); assert.equal(app.savedData.shares.old.key, undefined);
     const p = await plugin.store.createProject({ title: '主窗口项目', description: '项目说明' });
     const i = await plugin.store.createIssue(p.id, { title: '原生窗口中的 Issue', body: '[[普通笔记]]' });
     assert.ok(files.has(i.path));
@@ -74,15 +74,15 @@ test('bundled plugin registers native entry points; Vault adapter, protocol, API
     const response = await fetch(share); const result: any = await response.json();
     assert.equal(result.data.issue.id, i.id);
     assert.match(result.data.issue.body, /外部刚保存/);
-    await assert.rejects(plugin.agentCommand(i.id), /下载独立的 cli.mjs/);
+    assert.match(await plugin.resourceLink(i.id), /\/repos\/tests\/projects\/.+\/issues\/1$/);
     await plugin.copyCli();
     assert.equal(clipboard.length, 0, 'A community installation must not copy a command for a missing CLI file');
     assert.ok(mock.notices.some((message: string) => message.includes('下载独立的 cli.mjs')));
     files.set('.obsidian/plugins/local-issues/cli.mjs', '#!/usr/bin/env node');
     await plugin.copyCli();
     assert.match(clipboard[0], /node .*cli\.mjs.* --help/);
-    assert.match(await plugin.agentCommand(i.id), /^node .*cli\.mjs.* issue view 'http:.*' --json$/);
-    assert.match(await plugin.agentCommand(p.id), / project view /);
+    assert.match(await plugin.resourceLink(i.id), /\/issues\/1$/);
+    assert.match(await plugin.resourceLink(p.id), /\/repos\/tests\/projects\//);
     plugin.openSettings(); assert.match(mock.modals.at(-1).contentEl.textContent, /本地 Agent API/);
     mock.modals.at(-1).close();
     plugin.settings.apiEnabled = false;

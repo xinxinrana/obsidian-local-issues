@@ -1,6 +1,6 @@
 {
   "name": "obsidian-local-issues",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "description": "Local Markdown projects, issues and conversations for Obsidian.",
   "license": "MIT",

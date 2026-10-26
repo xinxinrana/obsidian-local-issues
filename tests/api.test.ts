@@ -31,14 +31,14 @@ test('API uses Markdown store for project → issue → comments, edits and stat
   } finally { await f.close(); }
 });
 
-test('API authentication, loopback Host, Origin, and scoped share capabilities', async () => {
+test('API loopback Host, browser rejection and legacy target routes', async () => {
   const f = await fixture();
   try {
     const health = await fetch(`${f.url}/api/health`); assert.equal(health.status, 200);
-    assert.deepEqual(await health.json(), { ok: true, data: { name: 'Local Issues', version: '0.1.2' } });
-    assert.equal((await fetch(`${f.url}/api/projects`)).status, 401);
+    assert.deepEqual(await health.json(), { ok: true, data: { name: 'Local Issues', version: '0.1.4' } });
+    assert.equal((await fetch(`${f.url}/api/projects`)).status, 200);
     const invalidHost = await new Promise<number>((resolve, reject) => {
-      const req = httpRequest(`${f.url}/api/projects`, { headers: { Host: 'evil.test', Authorization: `Bearer ${f.token}` } }, res => { res.resume(); resolve(res.statusCode!); }); req.on('error', reject); req.end();
+      const req = httpRequest(`${f.url}/api/projects`, { headers: { Host: 'evil.test' } }, res => { res.resume(); resolve(res.statusCode!); }); req.on('error', reject); req.end();
     });
     assert.equal(invalidHost, 403);
     assert.equal((await f.request('/api/projects', 'GET', undefined, { Origin: 'http://evil.test' })).status, 403);
@@ -56,7 +56,7 @@ test('API authentication, loopback Host, Origin, and scoped share capabilities',
     assert.equal(JSON.stringify(shared).includes('PRIVATE PROJECT DESCRIPTION'), false);
     assert.equal(JSON.stringify(shared).includes('CROSS PROJECT SECRET'), false);
     const withoutKey = new URL(share.data.url); withoutKey.search = '';
-    assert.equal((await fetch(withoutKey)).status, 403);
+    assert.equal((await fetch(withoutKey)).status, 200);
     const changed = await fetch(share.data.url, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: 'Shared edited', id: two.id }) });
     assert.equal(changed.status, 200); assert.equal((await f.store.getIssue(one.id)).title, 'Shared edited'); assert.equal((await f.store.getIssue(two.id)).title, 'Private');
     const commentUrl = new URL(share.data.url); commentUrl.pathname = commentUrl.pathname.replace(/resolve$/, 'comments');
@@ -68,7 +68,7 @@ test('API authentication, loopback Host, Origin, and scoped share capabilities',
     assert.equal((await fetch(foreignEdit, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body: 'Attack' }) })).status, 403);
     assert.equal((await f.store.snapshot()).timeline.find(t => t.id === privateComment.id)?.body, 'PRIVATE COMMENT');
     const global = new URL(share.data.url); global.pathname = '/api/issues';
-    assert.equal((await fetch(global)).status, 401);
+    assert.equal((await fetch(global)).status, 200);
     const invalid = new URL(share.data.url); invalid.pathname = invalid.pathname.replace('/resolve', '/issues');
     assert.equal((await fetch(invalid)).status, 404);
   } finally { await f.close(); }
@@ -90,8 +90,44 @@ test('API filtering, attachment persistence and invalid input', async () => {
     assert.equal(await f.adapter.exists(attach.data.path), true);
     assert.equal((await f.request(`/api/issues/${issue.id}/attachments`, 'POST', { name: 'screen.png', base64: '@bad' })).status, 400);
     assert.equal((await f.request('/api/issues', 'POST', { project: project.id, title: 123 })).status, 400);
-    const raw = await fetch(`${f.url}/api/issues`, { method: 'POST', headers: { Authorization: `Bearer ${f.token}`, 'Content-Type': 'application/json' }, body: '{not json' });
+    const raw = await fetch(`${f.url}/api/issues`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{not json' });
     assert.equal(raw.status, 400);
     assert.equal((await f.request('/api/does-not-exist')).status, 404);
+  } finally { await f.close(); }
+});
+
+test('semantic resource URLs identify repo, project, list and issue without credentials and keep stable routes', async () => {
+  const f = await fixture();
+  try {
+    const p = await f.store.createProject({ title: 'Local Issues' });
+    const one = await f.store.createIssue(p.id, { title: 'One', labels: ['bug'] });
+    const link = (await f.request(`/api/links?ref=${one.id}`)).data.url;
+    assert.equal(link, `${f.url}/repos/tests/projects/local-issues/issues/1`);
+    assert.equal(new URL(link).search, '');
+    const other = await f.store.createProject({ title: 'Local-Issues' });
+    const two = await f.store.createIssue(other.id, { title: 'Other project' });
+    assert.equal((await fetch(link)).status, 200);
+    assert.equal((await f.request(link)).data.issue.id, one.id);
+    const listUrl = link.replace('/issues/1', '/issues');
+    // A query cannot redirect a project route to another project's issues.
+    const list = await f.request(`${listUrl}?state=open&label=bug&project=${other.id}`);
+    assert.deepEqual(list.data.map((i: any) => i.id), [one.id]);
+    const projectUrl = link.replace('/issues/1', '');
+    assert.equal((await f.request(projectUrl)).data.project.id, p.id);
+    assert.equal((await f.request(`${f.url}/repos/tests`)).data.projects.length, 2);
+    assert.match((await f.request(`/api/links?ref=${two.id}`)).data.url, /\/local-issues-2\/issues\/1$/);
+    await f.store.updateProject(p.id, { title: 'Renamed project' });
+    assert.equal((await f.request(link)).data.issue.id, one.id);
+    assert.equal((await f.request(`/api/links?ref=${one.id}`)).data.url, link);
+    assert.equal((await f.request(link, 'PATCH', { title: 'Edited', actor: 'Agent' })).data.title, 'Edited');
+    assert.equal((await f.request(`${link}/comments`, 'POST', { body: 'Via semantic URL' })).status, 201);
+    assert.equal((await f.request(`${link}/close`, 'POST')).data.status, 'closed');
+    assert.equal((await f.request(`${f.url}/repos/wrong/projects/local-issues/issues/1`)).status, 404);
+    assert.equal((await f.request(`${projectUrl}/issues/999`)).status, 404);
+    assert.equal((await f.request(`${projectUrl}/issues/0`)).status, 400);
+    const chinese = await f.store.createProject({ title: '产品 / 设计 #方案' });
+    const chineseUrl = (await f.request(`/api/links?ref=${chinese.id}`)).data.url;
+    assert.match(chineseUrl, /产品-设计-方案/);
+    assert.equal((await f.request(chineseUrl)).data.project.id, chinese.id);
   } finally { await f.close(); }
 });

@@ -54,32 +54,38 @@ li issue reopen 1 -P 'My project'
 
 `--body-file file.md` reads Markdown from a file; `--body-file -` reads standard input. Use project-scoped numbers, stable IDs or full Obsidian links to identify issues. `--if-match <revision>` rejects a stale edit; read the current revision with `issue view --json` first.
 
-Choose **分享给 Agent** in a project or issue's **更多** menu. It copies one executable command using the installed CLI's absolute path, the target's share URL and `--json`. Paste that command to your agent. The agent reads the target through the CLI; no browser or list of API endpoints is needed. Install `cli.mjs` first; a missing CLI produces a download notice.
+Choose **分享给 Agent** to copy a readable resource URL, such as:
 
-Use the same URL as an argument, just as with `gh issue view <URL>`:
-
-```sh
-li issue view '<issue share URL>' --json
-li issue view '<issue share URL>' --comments
-li issue edit '<issue share URL>' --body-file description.md
-li issue comment '<issue share URL>' --body-file reply.md
-li issue close '<issue share URL>'
-li issue reopen '<issue share URL>'
-li project view '<project share URL>' --json
-li project edit '<project share URL>' --body 'Updated project description'
+```text
+http://127.0.0.1:27183/repos/obsidian
+http://127.0.0.1:27183/repos/obsidian/projects/local-issues
+http://127.0.0.1:27183/repos/obsidian/projects/local-issues/issues?state=open
+http://127.0.0.1:27183/repos/obsidian/projects/local-issues/issues/5
 ```
 
-The copied command uses `node '/absolute/path/cli.mjs'` instead of assuming that `li` is installed. For subsequent operations, reuse that executable prefix. JSON may include `comments` and `revision`; human-readable output includes the timeline only with `--comments` (`-c`). `--if-match <revision>` also protects shared edits. Shared issue edits support `--add-label` and `--remove-label`.
+The repository is the current vault. Project URL names remain stable after title edits. **复制 Issues 列表链接** preserves the current list filters. Links contain no executable commands or credentials. No login or keys are required.
 
-The existing `li share view/edit/comment/comment-edit` commands remain available. A share grants access to its target, without requiring the vault-wide API token. Project shares expose the project and its issues; they do not grant individual issue mutations. Use an issue share for issue changes. `--web` applies only to local numbers or IDs.
+```sh
+li view '<resource URL>' --json
+li repo view '<repo URL>' --json
+li project view '<project URL>' --json
+li issue list '<issues list URL>' --json
+li issue view '<issue URL>' --comments
+li issue edit '<issue URL>' --body-file description.md --if-match '<revision>'
+li issue comment '<issue URL>' --body-file reply.md
+li issue close '<issue URL>'
+li issue reopen '<issue URL>'
+```
+
+`li view` infers the target type. Replace `li` with `node '/absolute/path/cli.mjs'` if needed. Existing legacy share URLs and `li share ...` commands remain compatible. See the [link and CLI guide](docs/agent-cli.zh-CN.md).
 
 ## Local data and privacy
 
 Projects, issues, comments and status events live in `Local Issues/` by default. Each project has a `project.md` file, an `issues/` folder and a `timeline/` folder. Images and attachments are stored in `resource/local-issues/`. You can read and edit these Markdown files with Obsidian or another editor. Preserve their `id`, `type`, `projectId` and `issueId` properties. Issue states are `open`, `in-progress` and `closed`.
 
-No account, subscription, payment or remote service is required. There is no telemetry. The plugin makes no requests to external services. Its optional HTTP server binds only to `127.0.0.1`, on port `27183` by default. CLI requests are restricted to loopback HTTP addresses and use the API token in the plugin's local `data.json`.
+No account, subscription, payment or remote service is required. There is no telemetry. The plugin makes no requests to external services. Its optional HTTP server binds only to `127.0.0.1`, on port `27183` by default. CLI requests are restricted to loopback HTTP addresses. The local API requires no credentials and rejects browser cross-origin requests.
 
-Share URLs include a secret that grants read/write access to the shared target. They work only on the computer running Obsidian, and can be revoked in plugin settings. Do not post them publicly. API tokens and sharing secrets are kept in plugin settings, not in note content.
+Resource links identify local data. They work only on the computer running Obsidian; the local CLI can read and modify the active vault.
 
 The plugin operates inside the vault. The separate CLI reads its settings from the vault and reads attachment or body files outside the vault **only when you explicitly pass their paths**. The plugin does not automatically download, install or update the CLI or other software. External links in settings open GitHub only when clicked.
 

@@ -1,5 +1,6 @@
 import { App, FileSystemAdapter, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, normalizePath } from 'obsidian';
 import { randomBytes } from 'node:crypto';
+import { ResourceRoutes, slug } from './routes';
 import { Store } from './store';
 import { startApi } from './api';
 import { IssuesView, VIEW_TYPE, type ViewHost } from './view';
@@ -12,14 +13,16 @@ interface Settings {
   author: string;
   apiEnabled: boolean;
   port: number;
-  token: string;
-  shares: Record<string, { ref: string; key: string }>;
+  repoSlug?: string;
+  projectSlugs?: Record<string, string>;
+  shares: Record<string, { ref: string }>;
 }
-const DEFAULTS: Settings = { root: 'Local Issues', author: '我', apiEnabled: false, port: 27183, token: '', shares: {} };
+const DEFAULTS: Settings = { root: 'Local Issues', author: '我', apiEnabled: false, port: 27183, shares: {} };
 
 export default class LocalIssuesPlugin extends Plugin implements ViewHost {
   declare settings: Settings;
   store!: Store;
+  routes!: ResourceRoutes;
   private server?: Awaited<ReturnType<typeof startApi>>;
   private refreshTimer?: ReturnType<typeof setTimeout>;
   private unloaded = false;
@@ -30,7 +33,12 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
   async onload(): Promise<void> {
     const saved = await this.loadData();
     this.settings = { ...DEFAULTS, ...(saved ?? {}), shares: saved?.shares ?? {} };
-    if (!this.settings.token) this.settings.token = randomBytes(32).toString('hex');
+    delete (this.settings as unknown as Record<string, unknown>).token;
+    delete (this.settings as unknown as Record<string, unknown>).apiToken;
+    this.settings.shares = Object.fromEntries(Object.entries(this.settings.shares).map(([id, entry]) => [id, { ref: entry.ref }]));
+    this.settings.repoSlug ??= slug(this.app.vault.getName());
+    this.settings.projectSlugs ??= {};
+    this.routes = new ResourceRoutes(this.settings.repoSlug, this.settings.projectSlugs, () => this.saveData(this.settings));
     await this.saveData(this.settings);
     this.configureStore();
     this.registerView(VIEW_TYPE, leaf => new IssuesView(leaf, this));
@@ -136,18 +144,16 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
     let entry = Object.entries(this.settings.shares).find(([, s]) => s.ref === stableRef);
     if (!entry) {
       const id = randomBytes(12).toString('hex');
-      this.settings.shares[id] = { ref: stableRef, key: randomBytes(24).toString('hex') };
+      this.settings.shares[id] = { ref: stableRef };
       await this.saveData(this.settings);
       entry = [id, this.settings.shares[id]];
     }
-    return `http://127.0.0.1:${this.server.port}/api/shares/${entry[0]}/resolve?key=${entry[1].key}`;
+    return `http://127.0.0.1:${this.server.port}/api/shares/${entry[0]}/resolve`;
   }
 
-  async agentCommand(ref: string): Promise<string> {
-    const cli = await this.cliPath();
-    const target = await this.store.resolve(ref);
-    const url = await this.share(ref);
-    return `node ${shellQuote(cli)} ${target.kind === 'project' ? 'project' : 'issue'} view ${shellQuote(url)} --json`;
+  async resourceLink(ref?: string, scope?: 'issues'): Promise<string> {
+    if (!this.server) throw new Error('请先在 Local Issues 设置中启用本地 Agent API');
+    return `http://127.0.0.1:${this.server.port}${decodeURI(await this.routes.path(this.store, ref, scope))}`;
   }
 
   private async cliPath(): Promise<string> {
@@ -164,8 +170,8 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
       this.apiError = '';
       if (!this.settings.apiEnabled || this.unloaded) return;
       try {
-        this.server = await startApi({ store: this.store, port: this.settings.port, token: this.settings.token,
-          vaultName: this.app.vault.getName(), shares: this.settings.shares,
+        this.server = await startApi({ store: this.store, port: this.settings.port,
+          vaultName: this.app.vault.getName(), routes: this.routes, shares: this.settings.shares,
           saveShares: () => this.saveData(this.settings), open: ref => this.openReference(ref) });
       } catch (error) { this.apiError = error instanceof Error ? error.message : String(error); this.report(error); }
     });
@@ -227,11 +233,6 @@ class LocalIssuesSettings extends PluginSettingTab {
     cliDescription.append(' ', cliDownload);
     new Setting(el).setName('Agent CLI').setDesc(cliDescription)
       .addButton(b => b.setButtonText('复制 CLI 命令').onClick(() => p.copyCli()));
-    new Setting(el).setName('撤销分享链接').setDesc(`当前 ${Object.keys(p.settings.shares).length} 个本地分享链接。撤销后旧链接失效。`)
-      .addButton(b => b.setButtonText('全部撤销').onClick(async () => {
-        for (const key of Object.keys(p.settings.shares)) delete p.settings.shares[key];
-        await p.saveSettings(); this.display(); new Notice('分享链接已撤销');
-      }));
-    el.createEl('p', { text: '内容保存在 Markdown 文件中，附件位于 resource/local-issues/。停用插件后仍可直接阅读与编辑。分享链接包含读写权限，仅在这台电脑的 Obsidian 运行时可用。', cls: 'setting-item-description' });
+    el.createEl('p', { text: '内容保存在 Markdown 文件中，附件位于 resource/local-issues/。停用插件后仍可直接阅读与编辑。链接用于定位仓库、项目或议题，无需登录或密钥，仅在这台电脑的 Obsidian 运行时可用。', cls: 'setting-item-description' });
   }
 }

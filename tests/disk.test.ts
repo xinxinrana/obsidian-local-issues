@@ -29,7 +29,7 @@ test('disk edits immediately reach API and installed CLI; a fresh Store reconstr
     assert.equal(stale.status, 409);
     const pluginDir = join(f.vault, '.obsidian/plugins/local-issues'), cli = join(pluginDir, 'cli.mjs');
     await mkdir(pluginDir, { recursive: true });
-    await writeFile(join(pluginDir, 'data.json'), JSON.stringify({ port: f.server.port, token: f.token }));
+    await writeFile(join(pluginDir, 'data.json'), JSON.stringify({ port: f.server.port }));
     await build({ entryPoints: [resolve('src/cli.ts')], outfile: cli, bundle: true, platform: 'node', format: 'esm', target: 'node22', logLevel: 'silent' });
     const cliResult = await new Promise<{ code: number; stdout: string; stderr: string }>((resolveResult, reject) => {
       // Omit --vault to verify installation-directory discovery.

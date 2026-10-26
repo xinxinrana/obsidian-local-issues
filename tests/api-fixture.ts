@@ -23,13 +23,13 @@ export async function fixture() {
     async writeBinary(path, data) { await mkdir(dirname(join(vault, path)), { recursive: true }); await writeFile(join(vault, path), data); },
     async exists(path) { try { await access(join(vault, path)); return true; } catch { return false; } },
   };
-  const store = new Store(adapter), token = 'test-token-that-is-long-enough';
+  const store = new Store(adapter);
   const shares: Record<string, Share> = {};
-  const server = await startApi({ store, port: 0, token, vaultName: 'Tests', shares, saveShares: async () => {} });
+  const server = await startApi({ store, port: 0, vaultName: 'Tests', shares, saveShares: async () => {} });
   const url = `http://127.0.0.1:${server.port}`;
   async function request(path: string, method = 'GET', body?: unknown, custom: Record<string, string> = {}) {
-    const response = await fetch(new URL(path, url), { method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...custom }, body: body === undefined ? undefined : JSON.stringify(body) });
+    const response = await fetch(new URL(path, url), { method, headers: { 'Content-Type': 'application/json', ...custom }, body: body === undefined ? undefined : JSON.stringify(body) });
     return { status: response.status, ...(await response.json() as { ok: boolean; data?: any; error?: { code: string; message: string } }) };
   }
-  return { vault, adapter, store, token, shares, server, url, request, async close() { await server.close(); await rm(vault, { recursive: true, force: true }); } };
+  return { vault, adapter, store, shares, server, url, request, async close() { await server.close(); await rm(vault, { recursive: true, force: true }); } };
 }
