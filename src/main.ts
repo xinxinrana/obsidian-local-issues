@@ -5,6 +5,8 @@ import { startApi } from './api';
 import { IssuesView, VIEW_TYPE, type ViewHost } from './view';
 import type { VaultAdapter } from './types';
 
+const shellQuote = (value: string): string => "'" + value.replace(/'/g, "'\\''") + "'";
+
 interface Settings {
   root: string;
   author: string;
@@ -141,6 +143,21 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
     return `http://127.0.0.1:${this.server.port}/api/shares/${entry[0]}/resolve?key=${entry[1].key}`;
   }
 
+  async agentCommand(ref: string): Promise<string> {
+    const cli = await this.cliPath();
+    const target = await this.store.resolve(ref);
+    const url = await this.share(ref);
+    return `node ${shellQuote(cli)} ${target.kind === 'project' ? 'project' : 'issue'} view ${shellQuote(url)} --json`;
+  }
+
+  private async cliPath(): Promise<string> {
+    const adapter = this.app.vault.adapter;
+    const relativePath = `${this.manifest.dir ?? `${this.app.vault.configDir}/plugins/local-issues`}/cli.mjs`;
+    if (!await adapter.exists(relativePath)) throw new Error('请先从 GitHub Release 下载独立的 cli.mjs，放入 Local Issues 插件目录，再复制命令。');
+    const base = adapter instanceof FileSystemAdapter ? adapter.getBasePath() : '';
+    return `${base}/${relativePath}`;
+  }
+
   async restartApi(): Promise<void> {
     this.apiQueue = this.apiQueue.catch(() => {}).then(async () => {
       if (this.server) { await this.server.close(); this.server = undefined; }
@@ -165,17 +182,11 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
   }
 
   async copyCli(): Promise<void> {
-    const adapter = this.app.vault.adapter;
-    const base = adapter instanceof FileSystemAdapter ? adapter.getBasePath() : '';
-    const quote = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`;
-    const relativePath = `${this.manifest.dir ?? `${this.app.vault.configDir}/plugins/local-issues`}/cli.mjs`;
-    if (!await adapter.exists(relativePath)) {
-      new Notice('请先从 GitHub Release 下载独立的 cli.mjs，放入 Local Issues 插件目录，再复制命令。', 10000);
-      return;
-    }
-    const path = `${base}/${relativePath}`;
-    await navigator.clipboard.writeText(`node ${quote(path)} --help`);
-    new Notice('已复制 Agent CLI 命令；在终端粘贴即可查看用法');
+    try {
+      const path = await this.cliPath();
+      await navigator.clipboard.writeText(`node ${shellQuote(path)} --help`);
+      new Notice('已复制 Agent CLI 命令；在终端粘贴即可查看用法');
+    } catch (error) { this.report(error); }
   }
 
   async saveSettings(): Promise<void> { await this.saveData(this.settings); }

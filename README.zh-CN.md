@@ -32,7 +32,22 @@ GitHub Issues 的本地 Obsidian 版。一个笔记库可以有多个项目，�
 2. 在插件设置中启用 **本地 Agent API**。全新安装时默认关闭。
 3. 运行 `node cli.mjs --vault "/笔记库路径" --help`。
 
-CLI 目前按默认 `.obsidian` 配置目录定位 API 设置。完整命令、分享链接和 JSON 示例见 [English README](README.md#agent-cli)。
+CLI 目前按默认 `.obsidian` 配置目录定位 API 设置。完整命令见 [English README](README.md#agent-cli)。
+
+项目或议题的「更多 → 分享给 Agent」只复制一条命令，包含 CLI 的绝对路径、一个分享引用和 `--json`。直接粘贴给 agent，由它执行 CLI 读取；后续沿用同一个引用修改、评论或关闭，无需打开网页或提供多个 API 地址。未安装 CLI 时会提示下载。
+
+```sh
+li issue view '<议题分享引用>' --json
+li issue view '<议题分享引用>' --comments
+li issue edit '<议题分享引用>' --body-file description.md
+li issue comment '<议题分享引用>' --body-file reply.md
+li issue close '<议题分享引用>'
+li issue reopen '<议题分享引用>'
+li project view '<项目分享引用>' --json
+li project edit '<项目分享引用>' --body '项目说明'
+```
+
+上例 `li` 可替换为复制命令中的 `node '/绝对路径/cli.mjs'`。`--comments`（`-c`）显示评论和状态时间线；JSON 可按字段读取 `comments,revision`，修改时用 `--if-match <revision>` 防止覆盖。分享引用只授予对应目标的访问权限；项目分享可读取项目及其议题列表，修改具体议题需使用该议题的分享引用。旧版 `li share ...` 命令继续兼容。
 
 ## 文件和隐私
 

@@ -32,7 +32,7 @@ var HELP = `Local Issues \xB7 Obsidian \u672C\u5730\u9879\u76EE\u4E0E Issues
 \u7528\u6CD5: li <\u547D\u4EE4> [\u53C2\u6570] [\u9009\u9879]
 
   project list | view <\u9879\u76EE> | create | edit <\u9879\u76EE> | share <\u9879\u76EE>
-  issue list | view <\u7F16\u53F7/\u53CC\u94FE/ID> | create | edit <\u5F15\u7528>
+  issue list | view <\u7F16\u53F7/\u53CC\u94FE/ID/\u5206\u4EABURL> | create | edit <\u5F15\u7528>
   issue comment <\u5F15\u7528> | close <\u5F15\u7528> | reopen <\u5F15\u7528>
   issue attach <\u5F15\u7528> <\u6587\u4EF6> | share <\u5F15\u7528>
   comment edit <\u8BC4\u8BBAID> --body "\u5185\u5BB9"
@@ -42,6 +42,7 @@ var HELP = `Local Issues \xB7 Obsidian \u672C\u5730\u9879\u76EE\u4E0E Issues
   api <\u63A5\u53E3\u8DEF\u5F84> [-X METHOD] [-f key=value]
 
 \u5E38\u7528\u9009\u9879:
+  -c, --comments            \u663E\u793A\u8BC4\u8BBA\u4E0E\u72B6\u6001\u65F6\u95F4\u7EBF
   -P, --project <\u540D\u79F0/ID>    \u6307\u5B9A\u9879\u76EE\uFF08Issue \u7F16\u53F7\u5728\u9879\u76EE\u5185\u552F\u4E00\uFF09
   -t, --title <\u6807\u9898>        \u9879\u76EE\u6216 Issue \u6807\u9898
   -b, --body <Markdown>     \u63CF\u8FF0\u6216\u8BC4\u8BBA\u5185\u5BB9
@@ -71,10 +72,10 @@ var HELP = `Local Issues \xB7 Obsidian \u672C\u5730\u9879\u76EE\u4E0E Issues
 
 \u9700\u8981\u5728 Obsidian \u4E2D\u542F\u7528 Local Issues \u548C\u672C\u5730 API\u3002API \u53EA\u76D1\u542C\u672C\u673A\u3002
 \u5206\u4EAB\u94FE\u63A5\u5141\u8BB8\u6301\u6709\u8005\u8BFB\u53D6\u3001\u4FEE\u6539\u76EE\u6807\uFF0C\u4F9B\u672C\u673A Agent \u4F7F\u7528\u3002`;
-var aliases = { P: "project", t: "title", b: "body", F: "body-file", l: "label", a: "assignee", s: "state", S: "search", L: "limit", h: "help", X: "method", f: "field", H: "header" };
-var booleans = /* @__PURE__ */ new Set(["help", "web", "comment"]);
+var aliases = { c: "comments", P: "project", t: "title", b: "body", F: "body-file", l: "label", a: "assignee", s: "state", S: "search", L: "limit", h: "help", X: "method", f: "field", H: "header" };
+var booleans = /* @__PURE__ */ new Set(["help", "web", "comment", "comments"]);
 var multiples = /* @__PURE__ */ new Set(["label", "assignee", "depends-on", "add-label", "remove-label", "field", "header"]);
-var allowed = /* @__PURE__ */ new Set(["project", "title", "body", "body-file", "state", "status", "label", "assignee", "milestone", "parent", "depends-on", "due-date", "author", "search", "limit", "json", "web", "vault", "url", "if-match", "help", "method", "field", "header", "comment", "add-label", "remove-label", "description"]);
+var allowed = /* @__PURE__ */ new Set(["project", "title", "body", "body-file", "state", "status", "label", "assignee", "milestone", "parent", "depends-on", "due-date", "author", "search", "limit", "json", "web", "vault", "url", "if-match", "help", "method", "field", "header", "comment", "add-label", "remove-label", "description", "comments"]);
 function parse(argv) {
   const args = [], flags = {};
   for (let i = 0; i < argv.length; i++) {
@@ -210,7 +211,7 @@ function print(data, flags, kind) {
 ${data.issue.status} \xB7 ${data.issue.id}
 
 ${data.issue.body}`);
-    for (const entry of data.timeline ?? []) console.log(`
+    for (const entry of flags.comments ? data.timeline ?? [] : []) console.log(`
 ---
 ${entry.author} \xB7 ${entry.createdAt} \xB7 ${entry.id}
 ${entry.kind === "event" ? `${entry.from} \u2192 ${entry.to}` : entry.body}`);
@@ -253,7 +254,7 @@ async function main() {
   }
   const [command, action, ref, extra] = args;
   let shared;
-  const maybe = command === "share" ? ref : command === "issue" ? ref : void 0;
+  const maybe = ["share", "issue", "project"].includes(command) ? ref : void 0;
   if (maybe?.startsWith("http://")) {
     const parsed = localUrl(maybe);
     if (/^\/api\/shares\/[^/]+\/resolve$/.test(parsed.pathname) && parsed.searchParams.get("key")) shared = parsed;
@@ -266,9 +267,14 @@ async function main() {
   let data;
   if (shared) {
     const url = new URL(shared);
+    if (flags.web) throw new Error("\u5206\u4EAB\u5F15\u7528\u901A\u8FC7 CLI \u8BBF\u95EE\uFF1B--web \u4EC5\u7528\u4E8E\u672C\u5730\u7F16\u53F7\u6216 ID\u3002");
     if (action === "view" || action === "get") data = await api.request(url.pathname + url.search);
     else if (action === "edit") {
       const current = await api.request(url.pathname + url.search), patch = issuePatch(flags);
+      if (current.kind === "issue" && (flags["add-label"] || flags["remove-label"])) {
+        patch.labels = [.../* @__PURE__ */ new Set([...patch.labels ?? current.issue.labels, ...list(flags, "add-label") ?? []])].filter((x) => !(list(flags, "remove-label") ?? []).includes(x));
+        if (!val(flags, "if-match")) patch.expectedUpdatedAt = current.issue.revision ?? current.issue.updatedAt;
+      }
       if (current.kind === "project" && patch.body !== void 0) {
         patch.description = patch.body;
         delete patch.body;
@@ -278,13 +284,14 @@ async function main() {
         delete patch.author;
       }
       data = await api.request(url.pathname + url.search, "PATCH", patch);
-    } else if (action === "comment") {
+    } else if (action === "close" || action === "reopen") data = await api.request(url.pathname + url.search, "PATCH", { status: action === "close" ? "closed" : "open", actor: val(flags, "author") ?? "Agent" });
+    else if (action === "comment") {
       url.pathname = url.pathname.replace(/\/resolve$/, "/comments");
       data = await api.request(url.pathname + url.search, "POST", { body: required(body(flags), "\u8BC4\u8BBA\u6B63\u6587\uFF08--body \u6216 --body-file\uFF09"), author: val(flags, "author") ?? "Agent" });
     } else if (action === "comment-edit") {
       url.pathname = url.pathname.replace(/\/resolve$/, `/comments/${encodeURIComponent(required(extra, "\u8BC4\u8BBAID"))}`);
       data = await api.request(url.pathname + url.search, "PATCH", { body: required(body(flags), "\u8BC4\u8BBA\u6B63\u6587\uFF08--body \u6216 --body-file\uFF09") });
-    } else throw new Error("\u5206\u4EAB\u94FE\u63A5\u652F\u6301 view\u3001edit\u3001comment\u3001comment-edit\u3002");
+    } else throw new Error("\u5206\u4EAB\u94FE\u63A5\u652F\u6301 view\u3001edit\u3001comment\u3001comment-edit\u3001close\u3001reopen\u3002");
   } else if (command === "project") {
     if (action === "list") {
       const query = new URLSearchParams();

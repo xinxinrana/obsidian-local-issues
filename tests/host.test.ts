@@ -74,12 +74,15 @@ test('bundled plugin registers native entry points; Vault adapter, protocol, API
     const response = await fetch(share); const result: any = await response.json();
     assert.equal(result.data.issue.id, i.id);
     assert.match(result.data.issue.body, /外部刚保存/);
+    await assert.rejects(plugin.agentCommand(i.id), /下载独立的 cli.mjs/);
     await plugin.copyCli();
     assert.equal(clipboard.length, 0, 'A community installation must not copy a command for a missing CLI file');
     assert.ok(mock.notices.some((message: string) => message.includes('下载独立的 cli.mjs')));
     files.set('.obsidian/plugins/local-issues/cli.mjs', '#!/usr/bin/env node');
     await plugin.copyCli();
     assert.match(clipboard[0], /node .*cli\.mjs.* --help/);
+    assert.match(await plugin.agentCommand(i.id), /^node .*cli\.mjs.* issue view 'http:.*' --json$/);
+    assert.match(await plugin.agentCommand(p.id), / project view /);
     plugin.openSettings(); assert.match(mock.modals.at(-1).contentEl.textContent, /本地 Agent API/);
     mock.modals.at(-1).close();
     plugin.settings.apiEnabled = false;

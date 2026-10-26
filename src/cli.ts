@@ -8,7 +8,7 @@ const HELP = `Local Issues · Obsidian 本地项目与 Issues
 用法: li <命令> [参数] [选项]
 
   project list | view <项目> | create | edit <项目> | share <项目>
-  issue list | view <编号/双链/ID> | create | edit <引用>
+  issue list | view <编号/双链/ID/分享URL> | create | edit <引用>
   issue comment <引用> | close <引用> | reopen <引用>
   issue attach <引用> <文件> | share <引用>
   comment edit <评论ID> --body "内容"
@@ -18,6 +18,7 @@ const HELP = `Local Issues · Obsidian 本地项目与 Issues
   api <接口路径> [-X METHOD] [-f key=value]
 
 常用选项:
+  -c, --comments            显示评论与状态时间线
   -P, --project <名称/ID>    指定项目（Issue 编号在项目内唯一）
   -t, --title <标题>        项目或 Issue 标题
   -b, --body <Markdown>     描述或评论内容
@@ -48,10 +49,10 @@ const HELP = `Local Issues · Obsidian 本地项目与 Issues
 需要在 Obsidian 中启用 Local Issues 和本地 API。API 只监听本机。
 分享链接允许持有者读取、修改目标，供本机 Agent 使用。`;
 
-const aliases: Record<string, string> = { P: 'project', t: 'title', b: 'body', F: 'body-file', l: 'label', a: 'assignee', s: 'state', S: 'search', L: 'limit', h: 'help', X: 'method', f: 'field', H: 'header' };
-const booleans = new Set(['help', 'web', 'comment']);
+const aliases: Record<string, string> = { c: 'comments', P: 'project', t: 'title', b: 'body', F: 'body-file', l: 'label', a: 'assignee', s: 'state', S: 'search', L: 'limit', h: 'help', X: 'method', f: 'field', H: 'header' };
+const booleans = new Set(['help', 'web', 'comment', 'comments']);
 const multiples = new Set(['label', 'assignee', 'depends-on', 'add-label', 'remove-label', 'field', 'header']);
-const allowed = new Set(['project','title','body','body-file','state','status','label','assignee','milestone','parent','depends-on','due-date','author','search','limit','json','web','vault','url','if-match','help','method','field','header','comment','add-label','remove-label','description']);
+const allowed = new Set(['project','title','body','body-file','state','status','label','assignee','milestone','parent','depends-on','due-date','author','search','limit','json','web','vault','url','if-match','help','method','field','header','comment','add-label','remove-label','description','comments']);
 function parse(argv: string[]): { args: string[]; flags: Flags } {
   const args: string[] = [], flags: Flags = {};
   for (let i = 0; i < argv.length; i++) {
@@ -146,7 +147,7 @@ function print(data: any, flags: Flags, kind?: string): void {
   if (data?.markdown) { console.log(data.markdown); return; }
   if (data?.issue) {
     console.log(`#${data.issue.number} ${data.issue.title}\n${data.issue.status} · ${data.issue.id}\n\n${data.issue.body}`);
-    for (const entry of data.timeline ?? []) console.log(`\n---\n${entry.author} · ${entry.createdAt} · ${entry.id}\n${entry.kind === 'event' ? `${entry.from} → ${entry.to}` : entry.body}`);
+    for (const entry of flags.comments ? data.timeline ?? [] : []) console.log(`\n---\n${entry.author} · ${entry.createdAt} · ${entry.id}\n${entry.kind === 'event' ? `${entry.from} → ${entry.to}` : entry.body}`);
     return;
   }
   if (data?.project) { console.log(`${data.project.title}\n${data.project.description}\n`); print(data.issues ?? [], {}, 'issue'); return; }
@@ -168,7 +169,7 @@ async function main(): Promise<void> {
   if (flags.help || !args.length || args[0] === 'help') { console.log(HELP); return; }
   const [command, action, ref, extra] = args;
   let shared: URL | undefined;
-  const maybe = command === 'share' ? ref : command === 'issue' ? ref : undefined;
+  const maybe = ['share', 'issue', 'project'].includes(command) ? ref : undefined;
   if (maybe?.startsWith('http://')) { const parsed = localUrl(maybe); if (/^\/api\/shares\/[^/]+\/resolve$/.test(parsed.pathname) && parsed.searchParams.get('key')) shared = parsed; else throw new Error('请提供完整的分享链接。'); }
   const api = client(flags, shared);
   const project = val(flags, 'project');
@@ -177,16 +178,22 @@ async function main(): Promise<void> {
   let data: any;
   if (shared) {
     const url = new URL(shared);
+    if (flags.web) throw new Error('分享引用通过 CLI 访问；--web 仅用于本地编号或 ID。');
     if (action === 'view' || action === 'get') data = await api.request(url.pathname + url.search);
     else if (action === 'edit') {
       const current = await api.request(url.pathname + url.search), patch = issuePatch(flags);
+      if (current.kind === 'issue' && (flags['add-label'] || flags['remove-label'])) {
+        patch.labels = [...new Set([...(patch.labels as string[] ?? current.issue.labels), ...(list(flags, 'add-label') ?? [])])].filter(x => !(list(flags, 'remove-label') ?? []).includes(x));
+        if (!val(flags, 'if-match')) patch.expectedUpdatedAt = current.issue.revision ?? current.issue.updatedAt;
+      }
       if (current.kind === 'project' && patch.body !== undefined) { patch.description = patch.body; delete patch.body; }
       if (current.kind === 'issue') { patch.actor = val(flags, 'author') ?? 'Agent'; delete patch.author; }
       data = await api.request(url.pathname + url.search, 'PATCH', patch);
     }
+    else if (action === 'close' || action === 'reopen') data = await api.request(url.pathname + url.search, 'PATCH', { status: action === 'close' ? 'closed' : 'open', actor: val(flags, 'author') ?? 'Agent' });
     else if (action === 'comment') { url.pathname = url.pathname.replace(/\/resolve$/, '/comments'); data = await api.request(url.pathname + url.search, 'POST', { body: required(body(flags), '评论正文（--body 或 --body-file）'), author: val(flags, 'author') ?? 'Agent' }); }
     else if (action === 'comment-edit') { url.pathname = url.pathname.replace(/\/resolve$/, `/comments/${encodeURIComponent(required(extra, '评论ID'))}`); data = await api.request(url.pathname + url.search, 'PATCH', { body: required(body(flags), '评论正文（--body 或 --body-file）') }); }
-    else throw new Error('分享链接支持 view、edit、comment、comment-edit。');
+    else throw new Error('分享链接支持 view、edit、comment、comment-edit、close、reopen。');
   } else if (command === 'project') {
     if (action === 'list') {
       const query = new URLSearchParams(); if (val(flags, 'state')) query.set('state', val(flags, 'state')!); if (val(flags, 'search')) query.set('search', val(flags, 'search')!);

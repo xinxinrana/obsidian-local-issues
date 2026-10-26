@@ -2,7 +2,7 @@ import { Component, ItemView, MarkdownRenderer, Modal, Notice, Menu, setIcon, Wo
 import { ISSUE_STATUSES, STATUS_NAMES, issueLink, Issue, IssueInput, IssuePatch, IssueStore, Project, ProjectStatus, Snapshot, TimelineEntry } from './types';
 
 export const VIEW_TYPE = 'local-issues-view';
-export interface ViewHost { store: IssueStore; author: string; openNote(path: string): Promise<void>; share(ref: string): Promise<string>; openSettings(): void; }
+export interface ViewHost { store: IssueStore; author: string; openNote(path: string): Promise<void>; agentCommand(ref: string): Promise<string>; openSettings(): void; }
 const PROJECT_STATES: ProjectStatus[] = ['active', 'paused', 'completed', 'archived'];
 const el = <K extends keyof HTMLElementTagNameMap>(parent: HTMLElement, tag: K, cls = '', text = ''): HTMLElementTagNameMap[K] => { const node = document.createElement(tag); node.className = cls; if (text) node.textContent = text; parent.append(node); return node; };
 const action = (parent: HTMLElement, text: string, run: () => void, cls = '') => { const b = el(parent, 'button', cls, text); b.type = 'button'; b.addEventListener('click', run); return b; };
@@ -100,7 +100,7 @@ export class IssuesView extends ItemView {
     this.moreButton(actions, [
       ['编辑项目', () => this.projectModal(project)],
       ['打开笔记', () => safe(() => this.host.openNote(project.path))],
-      ['分享给 Agent', () => safe(async () => { await navigator.clipboard.writeText(await this.host.share(project.id)); new Notice('已复制项目分享链接'); })],
+      ['分享给 Agent', () => safe(async () => { await navigator.clipboard.writeText(await this.host.agentCommand(project.id)); new Notice('已复制项目 Agent 命令'); })],
     ], '项目更多操作');
     action(actions, '+ 新建 Issue', () => this.issueModal(project), 'mod-cta');
     if (project.description) this.markdown(root, project.description, project.path);
@@ -146,7 +146,7 @@ export class IssuesView extends ItemView {
     this.moreButton(controls, [
       ['打开笔记', () => safe(() => this.host.openNote(issue.path))],
       ['复制双链', () => safe(async () => { await navigator.clipboard.writeText(issueLink(issue)); new Notice('已复制双链'); })],
-      ['分享给 Agent', () => safe(async () => { await navigator.clipboard.writeText(await this.host.share(issue.id)); new Notice('已复制可供本机 Agent 读写的分享链接'); })],
+      ['分享给 Agent', () => safe(async () => { await navigator.clipboard.writeText(await this.host.agentCommand(issue.id)); new Notice('已复制 Agent 命令，粘贴给 Agent 即可'); })],
     ], 'Issue 更多操作');
     const summary = el(root, 'div', 'li-issue-summary'); pill(summary, issue.status); el(summary, 'span', 'li-muted', `${issue.author} 创建于 ${date(issue.createdAt)} · ${this.data.timeline.filter(e => e.issueId === issue.id && e.kind === 'comment').length} 条评论`);
     const detail = el(root, 'div', 'li-detail'); const main = el(detail, 'div', 'li-detail-main'); const sidebar = el(detail, 'aside', 'li-sidebar');

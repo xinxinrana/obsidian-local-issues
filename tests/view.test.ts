@@ -23,7 +23,7 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     writeBinary: async (p, bytes) => { binary.set(p, bytes); } };
   const store = new Store(adapter), copied: string[] = [], opened: string[] = [], shared: string[] = [];
   const app = { vault: { getMarkdownFiles: () => [...files.keys()].map(path => ({ path })) }, workspace: { openLinkText: async () => {} } };
-  const host = { store, author: 'Evan', openNote: async (path: string) => { opened.push(path); }, share: async (ref: string) => { shared.push(ref); return 'http://127.0.0.1:27183/share-test'; }, openSettings() {} };
+  const host = { store, author: 'Evan', openNote: async (path: string) => { opened.push(path); }, agentCommand: async (ref: string) => { shared.push(ref); return "node '/vault/cli.mjs' issue view 'http://127.0.0.1:27183/share-test' --json"; }, openSettings() {} };
   const built = await build({ entryPoints: ['src/view.ts'], bundle: true, write: false, format: 'cjs', platform: 'node', external: ['obsidian'], logLevel: 'silent' });
   const module = { exports: {} as any };
   vm.runInNewContext(built.outputFiles[0].text, { module, exports: module.exports, require: (id: string) => id === 'obsidian' ? mock : require(id),
@@ -116,7 +116,7 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     assert.ok(![...view.contentEl.querySelectorAll('.li-detail-actions button')].some((b: any) => b.textContent === '分享给 Agent'), '次要操作收纳于菜单');
     click('更多', view.contentEl.querySelector('.li-detail-actions')!); menuAction('分享给 Agent');
     await until(() => copied.length === 1, '菜单分享'); assert.deepEqual(shared, [issue.id]);
-    assert.match(copied[0], /share-test/);
+    assert.match(copied[0], /^node .* issue view .* --json$/); assert.equal(copied[0].split('\n').length, 1);
     click('更多', view.contentEl.querySelector('.li-detail-actions')!); menuAction('复制双链');
     await until(() => copied.length === 2, '菜单复制双链'); assert.ok(copied[1].includes(issue.path.replace(/\.md$/, '')));
     click('更多', view.contentEl.querySelector('.li-detail-actions')!); menuAction('打开笔记');

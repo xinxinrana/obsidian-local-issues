@@ -16,7 +16,7 @@ test('CLI gh-style lifecycle, JSON selection, stdin, files, attachments and shar
     await writeFile(join(f.vault, '.obsidian/plugins/local-issues/data.json'), JSON.stringify({ port: f.server.port, token: f.token }));
     function run(args: string[], input?: string, config = true): Promise<{ code: number; stdout: string; stderr: string }> {
       return new Promise((resolve, reject) => {
-        const child = spawn(process.execPath, [cli, ...(config ? ['--vault', f.vault] : []), ...args], { env: { ...process.env, LOCAL_ISSUES_TOKEN: '', LOCAL_ISSUES_URL: '' }, stdio: ['pipe', 'pipe', 'pipe'] });
+        const child = spawn(process.execPath, [cli, ...(config ? ['--vault', f.vault] : []), ...args], { env: { ...process.env, LOCAL_ISSUES_TOKEN: '', LOCAL_ISSUES_URL: '', LOCAL_ISSUES_VAULT: '' }, stdio: ['pipe', 'pipe', 'pipe'] });
         let stdout = '', stderr = ''; child.stdout.on('data', x => stdout += x); child.stderr.on('data', x => stderr += x);
         child.on('error', reject); child.on('close', code => resolve({ code: code ?? 1, stdout, stderr })); child.stdin.end(input);
       });
@@ -56,6 +56,26 @@ test('CLI gh-style lifecycle, JSON selection, stdin, files, attachments and shar
     const shareComment = await run(['issue', 'comment', share.url, '-b', 'Shared comment'], undefined, false); assert.equal(shareComment.code, 0, shareComment.stderr);
     const shareCommentEdit = await run(['share', 'comment-edit', share.url, one.id, '-b', 'Edited through share'], undefined, false); assert.equal(shareCommentEdit.code, 0, shareCommentEdit.stderr);
     assert.equal((await f.store.snapshot()).timeline.find(t => t.id === one.id)?.body, 'Edited through share');
+    const sharedView = await run(['issue', 'view', share.url, '--json', 'id,title,comments,revision'], undefined, false);
+    assert.equal(sharedView.code, 0, sharedView.stderr);
+    const sharedData = JSON.parse(sharedView.stdout); assert.equal(sharedData.id, created.id); assert.ok(sharedData.comments.length);
+    assert.equal((await run(['issue', 'view', share.url], undefined, false)).stdout.includes('Shared comment'), false);
+    assert.match((await run(['issue', 'view', share.url, '--comments'], undefined, false)).stdout, /Shared comment/);
+    const sharedLabels = await run(['issue', 'edit', share.url, '--add-label', 'scoped', '--remove-label', 'new'], undefined, false);
+    assert.equal(sharedLabels.code, 0, sharedLabels.stderr); assert.deepEqual((await f.store.getIssue(created.id)).labels, ['bug', 'scoped']);
+    const staleShared = await run(['issue', 'edit', share.url, '-t', 'Do not overwrite', '--if-match', sharedData.revision], undefined, false);
+    assert.equal(staleShared.code, 1); assert.match(staleShared.stderr, /CONFLICT/);
+    const file = join(temp, 'shared-body.md'); await writeFile(file, 'Shared body from file');
+    assert.equal((await run(['issue', 'edit', share.url, '--body-file', file], undefined, false)).code, 0);
+    assert.equal((await f.store.getIssue(created.id)).body, 'Shared body from file');
+    assert.equal((await run(['issue', 'close', share.url], undefined, false)).code, 0);
+    assert.equal((await f.store.getIssue(created.id)).status, 'closed');
+    assert.equal((await run(['issue', 'reopen', share.url], undefined, false)).code, 0);
+    assert.equal((await f.store.getIssue(created.id)).status, 'open');
+    const tampered = new URL(share.url); tampered.searchParams.set('key', 'invalid');
+    const denied = await run(['issue', 'view', tampered.toString()], undefined, false);
+    assert.equal(denied.code, 1); assert.match(denied.stderr, /FORBIDDEN/);
+    assert.equal((await run(['issue', 'view', share.url, '--web'], undefined, false)).code, 1);
     const resolved = await json(['resolve', `[[${created.path.replace(/\.md$/, '')}|Alias]]`]); assert.equal(resolved.id, created.id);
     const apiCreate = await json(['api', 'issues', '-f', `project=${project.id}`, '-f', 'title=JSON fields', '-f', 'labels=["a","b"]']); assert.deepEqual(apiCreate.labels, ['a', 'b']);
     const bad = await run(['issue', 'edit', created.id, '-t', 'Should not apply', '--if-match', 'stale']); assert.equal(bad.code, 1); assert.match(bad.stderr, /CONFLICT/);
@@ -63,5 +83,9 @@ test('CLI gh-style lifecycle, JSON selection, stdin, files, attachments and shar
     const projectShare = await json(['project', 'share', project.id]);
     assert.equal((await run(['share', 'edit', projectShare.url, '-b', 'Shared project description'], undefined, false)).code, 0);
     assert.equal((await f.store.getProject(project.id)).description, 'Shared project description');
+    const sharedProject = await run(['project', 'view', projectShare.url, '--json'], undefined, false);
+    assert.equal(sharedProject.code, 0, sharedProject.stderr); assert.equal(JSON.parse(sharedProject.stdout).id, project.id);
+    assert.equal((await run(['project', 'edit', projectShare.url, '-b', 'Project CLI description'], undefined, false)).code, 0);
+    assert.equal((await f.store.getProject(project.id)).description, 'Project CLI description');
   } finally { await f.close(); await rm(temp, { recursive: true, force: true }); }
 });

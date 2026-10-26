@@ -54,15 +54,24 @@ li issue reopen 1 -P 'My project'
 
 `--body-file file.md` reads Markdown from a file; `--body-file -` reads standard input. Use project-scoped numbers, stable IDs or full Obsidian links to identify issues. `--if-match <revision>` rejects a stale edit; read the current revision with `issue view --json` first.
 
-Copy a project or issue's **分享给 Agent** link from its **更多** menu, then read or edit the shared target from a local agent:
+Choose **分享给 Agent** in a project or issue's **更多** menu. It copies one executable command using the installed CLI's absolute path, the target's share URL and `--json`. Paste that command to your agent. The agent reads the target through the CLI; no browser or list of API endpoints is needed. Install `cli.mjs` first; a missing CLI produces a download notice.
+
+Use the same URL as an argument, just as with `gh issue view <URL>`:
 
 ```sh
-li share view '<share URL>' --json
-li share edit '<share URL>' --body 'Updated description'
-li share comment '<issue share URL>' --body 'Another comment'
-li share comment-edit '<issue share URL>' '<comment ID>' --body 'Edited comment'
-li resolve '[[Design]]' --json
+li issue view '<issue share URL>' --json
+li issue view '<issue share URL>' --comments
+li issue edit '<issue share URL>' --body-file description.md
+li issue comment '<issue share URL>' --body-file reply.md
+li issue close '<issue share URL>'
+li issue reopen '<issue share URL>'
+li project view '<project share URL>' --json
+li project edit '<project share URL>' --body 'Updated project description'
 ```
+
+The copied command uses `node '/absolute/path/cli.mjs'` instead of assuming that `li` is installed. For subsequent operations, reuse that executable prefix. JSON may include `comments` and `revision`; human-readable output includes the timeline only with `--comments` (`-c`). `--if-match <revision>` also protects shared edits. Shared issue edits support `--add-label` and `--remove-label`.
+
+The existing `li share view/edit/comment/comment-edit` commands remain available. A share grants access to its target, without requiring the vault-wide API token. Project shares expose the project and its issues; they do not grant individual issue mutations. Use an issue share for issue changes. `--web` applies only to local numbers or IDs.
 
 ## Local data and privacy
 
