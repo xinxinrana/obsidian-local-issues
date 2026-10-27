@@ -34,22 +34,24 @@ The CLI requires Node.js 22+ and a running desktop Obsidian instance with Local 
 2. Enable **本地 Agent API** in plugin settings. It is disabled by default on a new installation.
 3. Run `node cli.mjs --vault "/path/to/vault" --help`.
 
+**复制 CLI 命令** copies a minimal skill with the tool purpose, current port, semantic link routing and CLI examples. Paste it to an agent or save it as `local-issues/SKILL.md`.
+
 The default configuration directory is `.obsidian`. The CLI currently expects that default directory when locating a vault's API settings.
 
 For bash or zsh, define a convenience function after installing the CLI in the plugin folder:
 
 ```sh
-li() { node '/path/to/vault/.obsidian/plugins/local-issues/cli.mjs' "$@"; }
+local-issues() { node '/path/to/vault/.obsidian/plugins/local-issues/cli.mjs' "$@"; }
 
-li project create -t 'My project'
-li issue create -P 'My project' -t 'Support pasted images' -b 'See [[Design]]'
-li issue list -P 'My project' --state all --json number,title,status
-li issue view 1 -P 'My project' --json
-li issue comment 1 -P 'My project' -b 'Agent progress update' --author Agent
-li issue edit 1 -P 'My project' --label feature --milestone 'First release'
-li issue attach 1 -P 'My project' ./screenshot.png
-li issue close 1 -P 'My project'
-li issue reopen 1 -P 'My project'
+local-issues project create -t 'My project'
+local-issues issue create -P 'My project' -t 'Support pasted images' -b 'See [[Design]]'
+local-issues issue list -P 'My project' --state all --json number,title,status
+local-issues issue view 1 -P 'My project' --json
+local-issues issue comment 1 -P 'My project' -b 'Agent progress update' --author Agent
+local-issues issue edit 1 -P 'My project' --label feature --milestone 'First release'
+local-issues issue attach 1 -P 'My project' ./screenshot.png
+local-issues issue close 1 -P 'My project'
+local-issues issue reopen 1 -P 'My project'
 ```
 
 `--body-file file.md` reads Markdown from a file; `--body-file -` reads standard input. Use project-scoped numbers, stable IDs or full Obsidian links to identify issues. `--if-match <revision>` rejects a stale edit; read the current revision with `issue view --json` first.
@@ -66,22 +68,22 @@ http://localhost:27183/local-issues/issues/5
 The repository is the current vault. Project URL names remain stable after title edits. **复制 Issues 列表链接** preserves the current list filters. Links contain no executable commands or credentials. No login or keys are required.
 
 ```sh
-li view '<resource URL>' --json
-li repo view '<repo URL>' --json
-li project view '<project URL>' --json
-li issue list '<issues list URL>' --json
-li issue view '<issue URL>' --comments
-li issue edit '<issue URL>' --body-file description.md --if-match '<revision>'
-li issue comment '<issue URL>' --body-file reply.md
-li issue close '<issue URL>'
-li issue reopen '<issue URL>'
+local-issues view '<resource URL>' --json
+local-issues repo view '<repo URL>' --json
+local-issues project view '<project URL>' --json
+local-issues issue list '<issues list URL>' --json
+local-issues issue view '<issue URL>' --comments
+local-issues issue edit '<issue URL>' --body-file description.md --if-match '<revision>'
+local-issues issue comment '<issue URL>' --body-file reply.md
+local-issues issue close '<issue URL>'
+local-issues issue reopen '<issue URL>'
 ```
 
-`li view` infers the target type. Replace `li` with `node '/absolute/path/cli.mjs'` if needed. Existing legacy share URLs and `li share ...` commands remain compatible. See the [link and CLI guide](docs/agent-cli.zh-CN.md).
+Install from the source directory with `npm install -g .` to make the `local-issues` command available, including on Windows. `local-issues view` infers the target type. Replace `local-issues` with `node '/absolute/path/cli.mjs'` if needed. Existing legacy share URLs and `local-issues share ...` commands remain compatible. See the [link and CLI guide](docs/agent-cli.zh-CN.md).
 
 ## Local data and privacy
 
-Projects, issues, comments and status events live in `Local Issues/` by default. Each project has a `project.md` file, an `issues/` folder and a `timeline/` folder. Images and attachments are stored in `resource/local-issues/`. You can read and edit these Markdown files with Obsidian or another editor. Preserve their `id`, `type`, `projectId` and `issueId` properties. Issue states are `open`, `in-progress` and `closed`.
+Projects, issues, comments and status events live in `Local Issues/` by default. Each project has a `project.md` file, an `issues/` folder and a `timeline/` folder. Images and attachments are stored in `resource/local-issues/`. You can read and edit these Markdown files with Obsidian or another editor. Preserve their `id`, `type`, `projectId` and `issueId` properties. Issue states are `open` and `closed`; `closeReason` is `completed`, `on-hold`, or `not-planned`. Legacy `in-progress` is read as open.
 
 No account, subscription, payment or remote service is required. There is no telemetry. The plugin makes no requests to external services. Its optional HTTP server binds only to `127.0.0.1`, on port `27183` by default. CLI requests are restricted to loopback HTTP addresses. The local API requires no credentials and rejects browser cross-origin requests.
 

@@ -1,9 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { parseDocument, Document } from 'yaml';
-import type { Issue, IssueInput, IssuePatch, IssueStore, IssueStatus, Project, ProjectInput, ProjectPatch, Resolved, Snapshot, TimelineEntry, VaultAdapter } from './types';
+import type { Issue, IssueInput, IssuePatch, IssueStore, IssueStatus, CloseReason, Project, ProjectInput, ProjectPatch, Resolved, Snapshot, TimelineEntry, VaultAdapter } from './types';
 
 const PROJECT_STATUSES = ['active', 'paused', 'completed', 'archived'];
 const ISSUE_STATUSES = ['open', 'in-progress', 'closed'];
+const CLOSE_REASONS = ['completed', 'on-hold', 'not-planned'];
 const TYPES = ['local-issues/project', 'local-issues/issue', 'local-issues/comment', 'local-issues/event'];
 type Metadata = Record<string, unknown>;
 interface Parsed { data: Metadata; body: string; doc: Document; }
@@ -69,7 +70,7 @@ export class Store implements IssueStore {
           result.projects.push({ ...base, title: title(d.title), description: parsed.body, status: status(d.status, PROJECT_STATUSES), dueDate: text(d.dueDate) });
         } else if (d.type === 'local-issues/issue') {
           if (!text(d.projectId) || !Number.isInteger(d.number) || Number(d.number) < 1) throw new Error('缺少项目 ID 或有效编号');
-          result.issues.push({ ...base, projectId: text(d.projectId), number: Number(d.number), title: title(d.title), body: parsed.body, status: status(d.status, ISSUE_STATUSES), labels: strings(d.labels), milestone: text(d.milestone), assignees: strings(d.assignees), parent: text(d.parent), dependencies: strings(d.dependencies), dueDate: text(d.dueDate), author: text(d.author, this.author) });
+          result.issues.push({ ...base, projectId: text(d.projectId), number: Number(d.number), title: title(d.title), body: parsed.body, status: d.status === 'in-progress' ? 'open' : status(d.status, ISSUE_STATUSES), ...(d.status === 'closed' ? { closeReason: d.closeReason ? status<CloseReason>(d.closeReason, CLOSE_REASONS) : 'completed' as const } : {}), labels: strings(d.labels), milestone: text(d.milestone), assignees: strings(d.assignees), parent: text(d.parent), dependencies: strings(d.dependencies), dueDate: text(d.dueDate), author: text(d.author, this.author) });
         } else {
           if (!text(d.issueId)) throw new Error('缺少 Issue ID');
           const kind = d.type === 'local-issues/comment' ? 'comment' : 'event';
@@ -114,7 +115,7 @@ export class Store implements IssueStore {
   private projectMeta(p: Project): Metadata { return { type: 'local-issues/project', id: p.id, title: p.title, status: p.status, dueDate: p.dueDate, createdAt: p.createdAt, updatedAt: p.updatedAt }; }
   private issueMeta(i: Issue, snap: Snapshot): Metadata {
     const p = snap.projects.find(p => p.id === i.projectId);
-    return { type: 'local-issues/issue', id: i.id, projectId: i.projectId, project: p ? link(p.path) : '', number: i.number, title: i.title, status: i.status, labels: i.labels, milestone: i.milestone, assignees: i.assignees, parent: snap.issues.find(x => x.id === i.parent) ? link(snap.issues.find(x => x.id === i.parent)!.path) : i.parent, dependencies: i.dependencies.map(id => { const item = snap.issues.find(x => x.id === id); return item ? link(item.path) : id; }), dueDate: i.dueDate, author: i.author, createdAt: i.createdAt, updatedAt: i.updatedAt };
+    return { type: 'local-issues/issue', id: i.id, projectId: i.projectId, project: p ? link(p.path) : '', number: i.number, title: i.title, status: i.status, closeReason: i.status === 'closed' ? (i.closeReason || 'completed') : '', labels: i.labels, milestone: i.milestone, assignees: i.assignees, parent: snap.issues.find(x => x.id === i.parent) ? link(snap.issues.find(x => x.id === i.parent)!.path) : i.parent, dependencies: i.dependencies.map(id => { const item = snap.issues.find(x => x.id === id); return item ? link(item.path) : id; }), dueDate: i.dueDate, author: i.author, createdAt: i.createdAt, updatedAt: i.updatedAt };
   }
   async createProject(input: ProjectInput): Promise<Project> {
     return this.mutate(async () => {
@@ -142,7 +143,9 @@ export class Store implements IssueStore {
     const i = { ...base };
     if (patch.title !== undefined) i.title = title(patch.title);
     if (patch.body !== undefined) i.body = fieldText(patch.body, '描述');
-    if (patch.status !== undefined) i.status = status(patch.status, ISSUE_STATUSES);
+    if (patch.status !== undefined) { const next = status<IssueStatus>(patch.status, ISSUE_STATUSES); i.status = next === 'in-progress' ? 'open' : next; }
+    if (patch.closeReason !== undefined) i.closeReason = status<CloseReason>(patch.closeReason, CLOSE_REASONS);
+    if (i.status === 'closed') i.closeReason ||= 'completed'; else delete i.closeReason;
     if (patch.labels !== undefined) i.labels = fieldList(patch.labels, '标签');
     if (patch.assignees !== undefined) i.assignees = fieldList(patch.assignees, '负责人');
     if (patch.milestone !== undefined) i.milestone = fieldText(patch.milestone, '里程碑');
@@ -180,7 +183,7 @@ export class Store implements IssueStore {
       const previousRaw = await this.adapter.read(old.path); this.conflict({ updatedAt: '', revision: revision(previousRaw) }, old.revision);
       const raw = markdown(this.issueMeta(value, snap), value.body, parse(previousRaw));
       await this.adapter.write(value.path, raw, previousRaw);
-      if (value.status !== old.status) await this.writeTimeline(value, 'event', `${value.status === 'closed' ? '关闭了' : value.status === 'open' ? '重新打开了' : '开始处理'}此 Issue`, actor, { from: old.status, to: value.status });
+      if (value.status !== old.status || value.closeReason !== old.closeReason) await this.writeTimeline(value, 'event', value.status === 'closed' ? `关闭了此 Issue（${({ completed: '完成', 'on-hold': '搁置', 'not-planned': '不做' } as const)[value.closeReason || 'completed']}）` : '重新打开了此 Issue', actor, { from: old.status, to: value.status });
       return { ...value, revision: revision(raw) };
     });
   }

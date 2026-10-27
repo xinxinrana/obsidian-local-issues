@@ -6,7 +6,7 @@ import { resolve, dirname, basename } from 'node:path';
 type Flags = Record<string, string | boolean | string[]>;
 const HELP = `Local Issues · Obsidian 本地项目与 Issues
 
-用法: li <命令> [参数] [选项]
+用法: local-issues <命令> [参数] [选项]
 
   view <语义化URL>
   repo view <仓库URL> | link
@@ -26,9 +26,10 @@ const HELP = `Local Issues · Obsidian 本地项目与 Issues
   -t, --title <标题>        项目或 Issue 标题
   -b, --body <Markdown>     描述或评论内容
   -F, --body-file <文件>    从文件读正文；用 - 从标准输入读取
-  -s, --state <状态>        open / in-progress / closed / all
+  -s, --state <状态>        open / closed / all
   -l, --label <标签>        可多次使用，或用逗号分隔
   -a, --assignee <名字>     可多次使用
+      --reason <原因>       completed / on-hold / not-planned（关闭原因）
       --milestone <名称>   里程碑
       --parent <Issue>     父议题；空字符串可清除
       --depends-on <Issue> 依赖；可多次使用
@@ -42,12 +43,12 @@ const HELP = `Local Issues · Obsidian 本地项目与 Issues
       --if-match <时间>    仅当 updatedAt 匹配时修改，防止覆盖
 
 示例:
-  li project create -t "我的项目"
-  li issue create -P "我的项目" -t "支持图片" -b "说明 [[设计稿]]"
-  li issue comment 1 -P "我的项目" -F comment.md
-  li issue list -P "我的项目" --state all --json number,title,status
-  li issue attach 1 -P "我的项目" screenshot.png
-  li issue share '[[Local Issues/项目/issues/0001]]'
+  local-issues project create -t "我的项目"
+  local-issues issue create -P "我的项目" -t "支持图片" -b "说明 [[设计稿]]"
+  local-issues issue comment 1 -P "我的项目" -F comment.md
+  local-issues issue list -P "我的项目" --state all --json number,title,status
+  local-issues issue attach 1 -P "我的项目" screenshot.png
+  local-issues issue share '[[Local Issues/项目/issues/0001]]'
 
 需要在 Obsidian 中启用 Local Issues 和本地 API。API 只监听本机。
 语义化链接仅定位资源，无需登录或密钥；旧分享链接继续兼容。`;
@@ -55,7 +56,7 @@ const HELP = `Local Issues · Obsidian 本地项目与 Issues
 const aliases: Record<string, string> = { c: 'comments', P: 'project', t: 'title', b: 'body', F: 'body-file', l: 'label', a: 'assignee', s: 'state', S: 'search', L: 'limit', h: 'help', X: 'method', f: 'field', H: 'header' };
 const booleans = new Set(['help', 'web', 'comment', 'comments']);
 const multiples = new Set(['label', 'assignee', 'depends-on', 'add-label', 'remove-label', 'field', 'header']);
-const allowed = new Set(['project','title','body','body-file','state','status','label','assignee','milestone','parent','depends-on','due-date','author','search','limit','json','web','vault','url','if-match','help','method','field','header','comment','add-label','remove-label','description','comments']);
+const allowed = new Set(['project','title','body','body-file','state','status','label','assignee','milestone','parent','depends-on','due-date','author','search','limit','json','web','vault','url','if-match','help','method','field','header','comment','add-label','remove-label','description','comments','reason']);
 function parse(argv: string[]): { args: string[]; flags: Flags } {
   const args: string[] = [], flags: Flags = {};
   for (let i = 0; i < argv.length; i++) {
@@ -64,7 +65,7 @@ function parse(argv: string[]): { args: string[]; flags: Flags } {
     if (!arg.startsWith('-') || arg === '-') { args.push(arg); continue; }
     const match = /^--?([^=]+)(?:=(.*))?$/.exec(arg)!;
     const key = aliases[match[1]] ?? match[1];
-    if (!allowed.has(key)) throw new Error(`未知选项 ${arg}；运行 li --help 查看用法。`);
+    if (!allowed.has(key)) throw new Error(`未知选项 ${arg}；运行 local-issues --help 查看用法。`);
     let value: string | boolean = match[2] ?? true;
     if (key === 'json') {
       if (match[2] === undefined && argv[i + 1] && /^[A-Za-z][\w]*(?:,[A-Za-z][\w]*)*$/.test(argv[i + 1]) && i >= 2) value = argv[++i];
@@ -158,7 +159,7 @@ function print(data: any, flags: Flags, kind?: string): void {
 }
 function issuePatch(f: Flags): Record<string, unknown> {
   const result: Record<string, unknown> = {};
-  const scalar = { title: 'title', status: 'status', milestone: 'milestone', parent: 'parent', 'due-date': 'dueDate', author: 'author' };
+  const scalar = { title: 'title', status: 'status', milestone: 'milestone', parent: 'parent', 'due-date': 'dueDate', reason: 'closeReason', author: 'author' };
   for (const [flag, field] of Object.entries(scalar)) if (val(f, flag) !== undefined) result[field] = val(f, flag);
   if (val(f, 'state') !== undefined) result.status = val(f, 'state');
   const content = body(f); if (content !== undefined) result.body = content;
@@ -179,7 +180,7 @@ async function main(): Promise<void> {
       if (resource.kind === 'issues' && action === 'view') action = 'list';
     }
     const expected = resource.kind === 'repo' ? 'repo' : resource.kind === 'project' ? 'project' : 'issue';
-    if (command !== expected || (resource.kind === 'issues' ? action !== 'list' : action === 'list' || action === 'create')) throw new Error('命令与链接目标不匹配；使用 li view <链接> 自动识别目标。');
+    if (command !== expected || (resource.kind === 'issues' ? action !== 'list' : action === 'list' || action === 'create')) throw new Error('命令与链接目标不匹配；使用 local-issues view <链接> 自动识别目标。');
   }
   let shared: URL | undefined;
   const maybe = ['share', 'issue', 'project'].includes(command) ? ref : undefined;
@@ -206,14 +207,14 @@ async function main(): Promise<void> {
       if (current.kind === 'issue') { patch.actor = val(flags, 'author') ?? 'Agent'; delete patch.author; }
       data = await api.request(url.pathname + url.search, 'PATCH', patch);
     }
-    else if (action === 'close' || action === 'reopen') data = await api.request(url.pathname + url.search, 'PATCH', { status: action === 'close' ? 'closed' : 'open', actor: val(flags, 'author') ?? 'Agent' });
+    else if (action === 'close' || action === 'reopen') data = await api.request(url.pathname + url.search, 'PATCH', { status: action === 'close' ? 'closed' : 'open', ...(action === 'close' && val(flags, 'reason') ? { closeReason: val(flags, 'reason') } : {}), actor: val(flags, 'author') ?? 'Agent' });
     else if (action === 'comment') { url.pathname = url.pathname.replace(/\/resolve$/, '/comments'); data = await api.request(url.pathname + url.search, 'POST', { body: required(body(flags), '评论正文（--body 或 --body-file）'), author: val(flags, 'author') ?? 'Agent' }); }
     else if (action === 'comment-edit') { url.pathname = url.pathname.replace(/\/resolve$/, `/comments/${encodeURIComponent(required(extra, '评论ID'))}`); data = await api.request(url.pathname + url.search, 'PATCH', { body: required(body(flags), '评论正文（--body 或 --body-file）') }); }
     else throw new Error('分享链接支持 view、edit、comment、comment-edit、close、reopen。');
   } else if (command === 'repo') {
     if (action === 'view' && resourceUrl && resource?.kind === 'repo') data = await api.request(resourceUrl.toString());
     else if (action === 'link') data = await api.request('/api/links');
-    else throw new Error('用法：li repo view <仓库URL> 或 li repo link');
+    else throw new Error('用法：local-issues repo view <仓库URL> 或 local-issues repo link');
   } else if (command === 'project') {
     if (action === 'list') {
       const query = new URLSearchParams(); if (val(flags, 'state')) query.set('state', val(flags, 'state')!); if (val(flags, 'search')) query.set('search', val(flags, 'search')!);
@@ -228,7 +229,7 @@ async function main(): Promise<void> {
       if (action === 'create') required(value.title as string, '标题（--title）');
       data = await api.request(action === 'create' ? '/api/projects' : resourceUrl && resource ? resourceUrl.toString() : `/api/projects/${encodeURIComponent(required(ref, '项目'))}`, action === 'create' ? 'POST' : 'PATCH', value);
     } else if (action === 'share') data = resourceUrl && resource ? { url: resourceUrl.toString() } : await api.request(`/api/links?ref=${encodeURIComponent(required(ref, '项目'))}`);
-    else throw new Error('未知项目命令。运行 li --help 查看用法。');
+    else throw new Error('未知项目命令。运行 local-issues --help 查看用法。');
   } else if (command === 'issue') {
     if (action === 'list') {
       const query = new URLSearchParams(resourceUrl && resource ? resourceUrl.search : '');
@@ -250,14 +251,14 @@ async function main(): Promise<void> {
       }
       data = await api.request(issuePath(required(ref, 'Issue 引用')), 'PATCH', patch);
     } else if (action === 'comment') data = await api.request(subPath(required(ref, 'Issue 引用'), 'comments'), 'POST', { body: required(body(flags), '评论正文（--body 或 --body-file）'), author: val(flags, 'author') ?? 'Agent' });
-    else if (action === 'close' || action === 'reopen') data = await api.request(subPath(required(ref, 'Issue 引用'), action), 'POST', { actor: val(flags, 'author') ?? 'Agent' });
+    else if (action === 'close' || action === 'reopen') data = await api.request(subPath(required(ref, 'Issue 引用'), action), 'POST', { ...(action === 'close' && val(flags, 'reason') ? { closeReason: val(flags, 'reason') } : {}), actor: val(flags, 'author') ?? 'Agent' });
     else if (action === 'attach') {
       const file = resolve(required(extra, '附件文件'));
       const attachment = await api.request(subPath(required(ref, 'Issue 引用'), 'attachments'), 'POST', { name: basename(file), base64: readFileSync(file).toString('base64') });
       await api.request(subPath(ref!, 'comments'), 'POST', { body: [body(flags), attachment.markdown].filter(Boolean).join('\n\n'), author: val(flags, 'author') ?? 'Agent' });
       data = attachment;
     } else if (action === 'share') { const current = await api.request(issuePath(required(ref, 'Issue 引用'))); data = await api.request(`/api/links?ref=${encodeURIComponent(current.issue.id)}`); }
-    else throw new Error('未知 Issue 命令。运行 li --help 查看用法。');
+    else throw new Error('未知 Issue 命令。运行 local-issues --help 查看用法。');
   } else if (command === 'comment' && action === 'edit') data = await api.request(`/api/comments/${encodeURIComponent(required(ref, '评论 ID'))}`, 'PATCH', { body: required(body(flags), '评论正文（--body 或 --body-file）') });
   else if (command === 'resolve') data = await api.request(`/api/resolve?ref=${encodeURIComponent(required(action, '双链或引用'))}`);
   else if (command === 'api') {
@@ -266,7 +267,7 @@ async function main(): Promise<void> {
     let path = required(action, '接口路径'); if (!path.startsWith('/api/')) path = `/api/${path.replace(/^\//, '')}`;
     const method = (val(flags, 'method') ?? (Object.keys(fields).length ? 'POST' : 'GET')).toUpperCase();
     data = await api.request(path, method, method === 'GET' ? undefined : fields);
-  } else throw new Error('未知命令。运行 li --help 查看用法。');
+  } else throw new Error('未知命令。运行 local-issues --help 查看用法。');
   if (flags.web && !shared) {
     const target = data?.kind === 'repo' ? undefined : data?.issue?.id ?? data?.project?.id ?? data?.id ?? ref;
     if (target) await api.request('/api/open', 'POST', { ref: target });
@@ -276,4 +277,4 @@ async function main(): Promise<void> {
   print(data, flags, command);
 }
 
-void main().catch(error => { console.error(`li: ${error instanceof Error ? error.message : '操作失败'}`); process.exitCode = 1; });
+void main().catch(error => { console.error(`local-issues: ${error instanceof Error ? error.message : '操作失败'}`); process.exitCode = 1; });

@@ -193,3 +193,20 @@ test('atomic adapter compare rejects a disk edit injected between final read and
   await assert.rejects(store.editComment(c.id, 'comment UI', c.revision), /冲突/);
   assert.equal((await store.snapshot()).timeline.find(x => x.id === c.id)!.body, 'comment external');
 });
+
+
+test('closed reasons persist, reopen clears the reason and legacy statuses remain readable', async () => {
+  const { store, adapter } = setup(); const p = await store.createProject({ title: '项目' }); const i = await store.createIssue(p.id, { title: '议题' });
+  adapter.files.set(i.path, adapter.files.get(i.path)!.replace('status: open', 'status: in-progress'));
+  assert.equal((await store.getIssue(i.id)).status, 'open');
+  for (const reason of ['completed', 'on-hold', 'not-planned'] as const) {
+    await store.updateIssue(i.id, { status: 'closed', closeReason: reason });
+    assert.equal((await store.getIssue(i.id)).closeReason, reason);
+    assert.match(adapter.files.get(i.path)!, new RegExp(`closeReason: "?${reason}"?`));
+  }
+  await store.updateIssue(i.id, { status: 'open' }); assert.equal((await store.getIssue(i.id)).closeReason, undefined);
+  await store.updateIssue(i.id, { status: 'closed' }); assert.equal((await store.getIssue(i.id)).closeReason, 'completed');
+  await assert.rejects(store.updateIssue(i.id, { closeReason: 'invalid' as any }), /未知状态/);
+  adapter.files.set(i.path, adapter.files.get(i.path)!.replace(/closeReason: "?completed"?\n/, ''));
+  assert.equal((await store.getIssue(i.id)).closeReason, 'completed');
+});

@@ -15,7 +15,7 @@ test('API uses Markdown store for project → issue → comments, edits and stat
     const second = await f.request(`/api/issues/${id}/comments`, 'POST', { body: '第二条评论' });
     assert.equal(second.status, 201);
     assert.equal((await f.request(`/api/comments/${comment.data.id}`, 'PATCH', { body: '修改后的评论' })).data.body, '修改后的评论');
-    assert.equal((await f.request(`/api/issues/${id}/close`, 'POST')).data.status, 'closed');
+    const closed = await f.request(`/api/issues/${id}/close`, 'POST', { closeReason: 'on-hold' }); assert.equal(closed.data.status, 'closed'); assert.equal(closed.data.closeReason, 'on-hold');
     assert.equal((await f.request(`/api/issues/${id}/reopen`, 'POST')).data.status, 'open');
     const detail = await f.request(`/api/issues/${id}`);
     assert.equal(detail.data.comments.length, 2);
@@ -35,7 +35,7 @@ test('API loopback Host, browser rejection and legacy target routes', async () =
   const f = await fixture();
   try {
     const health = await fetch(`${f.url}/api/health`); assert.equal(health.status, 200);
-    assert.deepEqual(await health.json(), { ok: true, data: { name: 'Local Issues', version: '0.1.5' } });
+    assert.deepEqual(await health.json(), { ok: true, data: { name: 'Local Issues', version: '0.1.6' } });
     assert.equal((await fetch(`${f.url}/api/projects`)).status, 200);
     const invalidHost = await new Promise<number>((resolve, reject) => {
       const req = httpRequest(`${f.url}/api/projects`, { headers: { Host: 'evil.test' } }, res => { res.resume(); resolve(res.statusCode!); }); req.on('error', reject); req.end();

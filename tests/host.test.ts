@@ -80,7 +80,12 @@ test('bundled plugin registers native entry points; Vault adapter, protocol, API
     assert.ok(mock.notices.some((message: string) => message.includes('下载独立的 cli.mjs')));
     files.set('.obsidian/plugins/local-issues/cli.mjs', '#!/usr/bin/env node');
     await plugin.copyCli();
-    assert.match(clipboard[0], /node .*cli\.mjs.* --help/);
+    assert.match(clipboard[0], /^---\nname: local-issues\n/);
+    assert.ok(clipboard[0].includes(`http://localhost:${new URL(share).port}/`), 'Use the running API port, including dynamically allocated ports');
+    assert.match(clipboard[0], /node .*cli\.mjs.* --url 'http:\/\/localhost:\d+'/);
+    assert.match(clipboard[0], /view '<链接>' --json/);
+    assert.match(clipboard[0], /issue comment/);
+    assert.match(clipboard[0], /Obsidian/);
     assert.match(await plugin.resourceLink(i.id), /\/issues\/1$/);
     assert.match(await plugin.resourceLink(p.id), /^http:\/\/localhost:\d+\/[^/]+$/);
     plugin.openSettings(); assert.match(mock.modals.at(-1).contentEl.textContent, /本地 Agent API/);

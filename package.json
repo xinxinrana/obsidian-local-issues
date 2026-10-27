@@ -1,6 +1,6 @@
 {
   "name": "obsidian-local-issues",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": true,
   "description": "Local Markdown projects, issues and conversations for Obsidian.",
   "license": "MIT",
@@ -26,5 +26,8 @@
   "bugs": {
     "url": "https://github.com/xinxinrana/obsidian-local-issues/issues"
   },
-  "homepage": "https://github.com/xinxinrana/obsidian-local-issues#readme"
+  "homepage": "https://github.com/xinxinrana/obsidian-local-issues#readme",
+  "bin": {
+    "local-issues": "./cli.mjs"
+  }
 }

@@ -26,7 +26,7 @@ test('CLI gh-style lifecycle, JSON selection, stdin, files, attachments and shar
     const project = await json(['project', 'create', '-t', 'CLI 项目', '-b', '说明']);
     const installedCli = join(f.vault, '.obsidian/plugins/local-issues/cli.mjs');
     await copyFile(cli, installedCli); await chmod(installedCli, 0o755);
-    const shortCommand = join(temp, 'li'); await symlink(installedCli, shortCommand);
+    const shortCommand = join(temp, 'local-issues'); await symlink(installedCli, shortCommand);
     const viaSymlink = await new Promise<{ code: number; stdout: string; stderr: string }>((resolve, reject) => {
       const child = spawn(shortCommand, ['project', 'list', '--json'], { cwd: temp, env: { ...process.env, LOCAL_ISSUES_TOKEN: '', LOCAL_ISSUES_URL: '', LOCAL_ISSUES_VAULT: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
       let stdout = '', stderr = ''; child.stdout.on('data', x => stdout += x); child.stderr.on('data', x => stderr += x); child.on('error', reject); child.on('close', code => resolve({ code: code ?? 1, stdout, stderr }));
@@ -37,7 +37,7 @@ test('CLI gh-style lifecycle, JSON selection, stdin, files, attachments and shar
     const one = await json(['issue', 'comment', '1', '-P', project.id, '-b', 'First comment']);
     assert.equal(one.author, 'Agent');
     await json(['comment', 'edit', one.id, '-b', 'Edited comment']);
-    await json(['issue', 'close', '1', '-P', project.id]);
+    await json(['issue', 'close', '1', '-P', project.id, '--reason', 'not-planned']); assert.equal((await f.store.getIssue(created.id)).closeReason, 'not-planned');
     await json(['issue', 'reopen', '1', '-P', project.id]);
     const selected = await run(['issue', 'view', '1', '-P', project.id, '--json', 'number,title,comments']);
     assert.equal(selected.code, 0, selected.stderr);

@@ -50,7 +50,7 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { resolve, dirname, basename } from "node:path";
 var HELP = `Local Issues \xB7 Obsidian \u672C\u5730\u9879\u76EE\u4E0E Issues
 
-\u7528\u6CD5: li <\u547D\u4EE4> [\u53C2\u6570] [\u9009\u9879]
+\u7528\u6CD5: local-issues <\u547D\u4EE4> [\u53C2\u6570] [\u9009\u9879]
 
   view <\u8BED\u4E49\u5316URL>
   repo view <\u4ED3\u5E93URL> | link
@@ -70,9 +70,10 @@ var HELP = `Local Issues \xB7 Obsidian \u672C\u5730\u9879\u76EE\u4E0E Issues
   -t, --title <\u6807\u9898>        \u9879\u76EE\u6216 Issue \u6807\u9898
   -b, --body <Markdown>     \u63CF\u8FF0\u6216\u8BC4\u8BBA\u5185\u5BB9
   -F, --body-file <\u6587\u4EF6>    \u4ECE\u6587\u4EF6\u8BFB\u6B63\u6587\uFF1B\u7528 - \u4ECE\u6807\u51C6\u8F93\u5165\u8BFB\u53D6
-  -s, --state <\u72B6\u6001>        open / in-progress / closed / all
+  -s, --state <\u72B6\u6001>        open / closed / all
   -l, --label <\u6807\u7B7E>        \u53EF\u591A\u6B21\u4F7F\u7528\uFF0C\u6216\u7528\u9017\u53F7\u5206\u9694
   -a, --assignee <\u540D\u5B57>     \u53EF\u591A\u6B21\u4F7F\u7528
+      --reason <\u539F\u56E0>       completed / on-hold / not-planned\uFF08\u5173\u95ED\u539F\u56E0\uFF09
       --milestone <\u540D\u79F0>   \u91CC\u7A0B\u7891
       --parent <Issue>     \u7236\u8BAE\u9898\uFF1B\u7A7A\u5B57\u7B26\u4E32\u53EF\u6E05\u9664
       --depends-on <Issue> \u4F9D\u8D56\uFF1B\u53EF\u591A\u6B21\u4F7F\u7528
@@ -86,19 +87,19 @@ var HELP = `Local Issues \xB7 Obsidian \u672C\u5730\u9879\u76EE\u4E0E Issues
       --if-match <\u65F6\u95F4>    \u4EC5\u5F53 updatedAt \u5339\u914D\u65F6\u4FEE\u6539\uFF0C\u9632\u6B62\u8986\u76D6
 
 \u793A\u4F8B:
-  li project create -t "\u6211\u7684\u9879\u76EE"
-  li issue create -P "\u6211\u7684\u9879\u76EE" -t "\u652F\u6301\u56FE\u7247" -b "\u8BF4\u660E [[\u8BBE\u8BA1\u7A3F]]"
-  li issue comment 1 -P "\u6211\u7684\u9879\u76EE" -F comment.md
-  li issue list -P "\u6211\u7684\u9879\u76EE" --state all --json number,title,status
-  li issue attach 1 -P "\u6211\u7684\u9879\u76EE" screenshot.png
-  li issue share '[[Local Issues/\u9879\u76EE/issues/0001]]'
+  local-issues project create -t "\u6211\u7684\u9879\u76EE"
+  local-issues issue create -P "\u6211\u7684\u9879\u76EE" -t "\u652F\u6301\u56FE\u7247" -b "\u8BF4\u660E [[\u8BBE\u8BA1\u7A3F]]"
+  local-issues issue comment 1 -P "\u6211\u7684\u9879\u76EE" -F comment.md
+  local-issues issue list -P "\u6211\u7684\u9879\u76EE" --state all --json number,title,status
+  local-issues issue attach 1 -P "\u6211\u7684\u9879\u76EE" screenshot.png
+  local-issues issue share '[[Local Issues/\u9879\u76EE/issues/0001]]'
 
 \u9700\u8981\u5728 Obsidian \u4E2D\u542F\u7528 Local Issues \u548C\u672C\u5730 API\u3002API \u53EA\u76D1\u542C\u672C\u673A\u3002
 \u8BED\u4E49\u5316\u94FE\u63A5\u4EC5\u5B9A\u4F4D\u8D44\u6E90\uFF0C\u65E0\u9700\u767B\u5F55\u6216\u5BC6\u94A5\uFF1B\u65E7\u5206\u4EAB\u94FE\u63A5\u7EE7\u7EED\u517C\u5BB9\u3002`;
 var aliases = { c: "comments", P: "project", t: "title", b: "body", F: "body-file", l: "label", a: "assignee", s: "state", S: "search", L: "limit", h: "help", X: "method", f: "field", H: "header" };
 var booleans = /* @__PURE__ */ new Set(["help", "web", "comment", "comments"]);
 var multiples = /* @__PURE__ */ new Set(["label", "assignee", "depends-on", "add-label", "remove-label", "field", "header"]);
-var allowed = /* @__PURE__ */ new Set(["project", "title", "body", "body-file", "state", "status", "label", "assignee", "milestone", "parent", "depends-on", "due-date", "author", "search", "limit", "json", "web", "vault", "url", "if-match", "help", "method", "field", "header", "comment", "add-label", "remove-label", "description", "comments"]);
+var allowed = /* @__PURE__ */ new Set(["project", "title", "body", "body-file", "state", "status", "label", "assignee", "milestone", "parent", "depends-on", "due-date", "author", "search", "limit", "json", "web", "vault", "url", "if-match", "help", "method", "field", "header", "comment", "add-label", "remove-label", "description", "comments", "reason"]);
 function parse(argv) {
   const args = [], flags = {};
   for (let i = 0; i < argv.length; i++) {
@@ -113,7 +114,7 @@ function parse(argv) {
     }
     const match = /^--?([^=]+)(?:=(.*))?$/.exec(arg);
     const key = aliases[match[1]] ?? match[1];
-    if (!allowed.has(key)) throw new Error(`\u672A\u77E5\u9009\u9879 ${arg}\uFF1B\u8FD0\u884C li --help \u67E5\u770B\u7528\u6CD5\u3002`);
+    if (!allowed.has(key)) throw new Error(`\u672A\u77E5\u9009\u9879 ${arg}\uFF1B\u8FD0\u884C local-issues --help \u67E5\u770B\u7528\u6CD5\u3002`);
     let value = match[2] ?? true;
     if (key === "json") {
       if (match[2] === void 0 && argv[i + 1] && /^[A-Za-z][\w]*(?:,[A-Za-z][\w]*)*$/.test(argv[i + 1]) && i >= 2) value = argv[++i];
@@ -259,7 +260,7 @@ ${data.path ?? data.id}`);
 }
 function issuePatch(f) {
   const result = {};
-  const scalar = { title: "title", status: "status", milestone: "milestone", parent: "parent", "due-date": "dueDate", author: "author" };
+  const scalar = { title: "title", status: "status", milestone: "milestone", parent: "parent", "due-date": "dueDate", reason: "closeReason", author: "author" };
   for (const [flag, field] of Object.entries(scalar)) if (val(f, flag) !== void 0) result[field] = val(f, flag);
   if (val(f, "state") !== void 0) result.status = val(f, "state");
   const content = body(f);
@@ -287,7 +288,7 @@ async function main() {
       if (resource.kind === "issues" && action === "view") action = "list";
     }
     const expected = resource.kind === "repo" ? "repo" : resource.kind === "project" ? "project" : "issue";
-    if (command !== expected || (resource.kind === "issues" ? action !== "list" : action === "list" || action === "create")) throw new Error("\u547D\u4EE4\u4E0E\u94FE\u63A5\u76EE\u6807\u4E0D\u5339\u914D\uFF1B\u4F7F\u7528 li view <\u94FE\u63A5> \u81EA\u52A8\u8BC6\u522B\u76EE\u6807\u3002");
+    if (command !== expected || (resource.kind === "issues" ? action !== "list" : action === "list" || action === "create")) throw new Error("\u547D\u4EE4\u4E0E\u94FE\u63A5\u76EE\u6807\u4E0D\u5339\u914D\uFF1B\u4F7F\u7528 local-issues view <\u94FE\u63A5> \u81EA\u52A8\u8BC6\u522B\u76EE\u6807\u3002");
   }
   let shared;
   const maybe = ["share", "issue", "project"].includes(command) ? ref : void 0;
@@ -327,7 +328,7 @@ async function main() {
         delete patch.author;
       }
       data = await api.request(url.pathname + url.search, "PATCH", patch);
-    } else if (action === "close" || action === "reopen") data = await api.request(url.pathname + url.search, "PATCH", { status: action === "close" ? "closed" : "open", actor: val(flags, "author") ?? "Agent" });
+    } else if (action === "close" || action === "reopen") data = await api.request(url.pathname + url.search, "PATCH", { status: action === "close" ? "closed" : "open", ...action === "close" && val(flags, "reason") ? { closeReason: val(flags, "reason") } : {}, actor: val(flags, "author") ?? "Agent" });
     else if (action === "comment") {
       url.pathname = url.pathname.replace(/\/resolve$/, "/comments");
       data = await api.request(url.pathname + url.search, "POST", { body: required(body(flags), "\u8BC4\u8BBA\u6B63\u6587\uFF08--body \u6216 --body-file\uFF09"), author: val(flags, "author") ?? "Agent" });
@@ -338,7 +339,7 @@ async function main() {
   } else if (command === "repo") {
     if (action === "view" && resourceUrl && resource?.kind === "repo") data = await api.request(resourceUrl.toString());
     else if (action === "link") data = await api.request("/api/links");
-    else throw new Error("\u7528\u6CD5\uFF1Ali repo view <\u4ED3\u5E93URL> \u6216 li repo link");
+    else throw new Error("\u7528\u6CD5\uFF1Alocal-issues repo view <\u4ED3\u5E93URL> \u6216 local-issues repo link");
   } else if (command === "project") {
     if (action === "list") {
       const query = new URLSearchParams();
@@ -356,7 +357,7 @@ async function main() {
       if (action === "create") required(value.title, "\u6807\u9898\uFF08--title\uFF09");
       data = await api.request(action === "create" ? "/api/projects" : resourceUrl && resource ? resourceUrl.toString() : `/api/projects/${encodeURIComponent(required(ref, "\u9879\u76EE"))}`, action === "create" ? "POST" : "PATCH", value);
     } else if (action === "share") data = resourceUrl && resource ? { url: resourceUrl.toString() } : await api.request(`/api/links?ref=${encodeURIComponent(required(ref, "\u9879\u76EE"))}`);
-    else throw new Error("\u672A\u77E5\u9879\u76EE\u547D\u4EE4\u3002\u8FD0\u884C li --help \u67E5\u770B\u7528\u6CD5\u3002");
+    else throw new Error("\u672A\u77E5\u9879\u76EE\u547D\u4EE4\u3002\u8FD0\u884C local-issues --help \u67E5\u770B\u7528\u6CD5\u3002");
   } else if (command === "issue") {
     if (action === "list") {
       const query = new URLSearchParams(resourceUrl && resource ? resourceUrl.search : "");
@@ -380,7 +381,7 @@ async function main() {
       }
       data = await api.request(issuePath(required(ref, "Issue \u5F15\u7528")), "PATCH", patch);
     } else if (action === "comment") data = await api.request(subPath(required(ref, "Issue \u5F15\u7528"), "comments"), "POST", { body: required(body(flags), "\u8BC4\u8BBA\u6B63\u6587\uFF08--body \u6216 --body-file\uFF09"), author: val(flags, "author") ?? "Agent" });
-    else if (action === "close" || action === "reopen") data = await api.request(subPath(required(ref, "Issue \u5F15\u7528"), action), "POST", { actor: val(flags, "author") ?? "Agent" });
+    else if (action === "close" || action === "reopen") data = await api.request(subPath(required(ref, "Issue \u5F15\u7528"), action), "POST", { ...action === "close" && val(flags, "reason") ? { closeReason: val(flags, "reason") } : {}, actor: val(flags, "author") ?? "Agent" });
     else if (action === "attach") {
       const file = resolve(required(extra, "\u9644\u4EF6\u6587\u4EF6"));
       const attachment = await api.request(subPath(required(ref, "Issue \u5F15\u7528"), "attachments"), "POST", { name: basename(file), base64: readFileSync(file).toString("base64") });
@@ -389,7 +390,7 @@ async function main() {
     } else if (action === "share") {
       const current = await api.request(issuePath(required(ref, "Issue \u5F15\u7528")));
       data = await api.request(`/api/links?ref=${encodeURIComponent(current.issue.id)}`);
-    } else throw new Error("\u672A\u77E5 Issue \u547D\u4EE4\u3002\u8FD0\u884C li --help \u67E5\u770B\u7528\u6CD5\u3002");
+    } else throw new Error("\u672A\u77E5 Issue \u547D\u4EE4\u3002\u8FD0\u884C local-issues --help \u67E5\u770B\u7528\u6CD5\u3002");
   } else if (command === "comment" && action === "edit") data = await api.request(`/api/comments/${encodeURIComponent(required(ref, "\u8BC4\u8BBA ID"))}`, "PATCH", { body: required(body(flags), "\u8BC4\u8BBA\u6B63\u6587\uFF08--body \u6216 --body-file\uFF09") });
   else if (command === "resolve") data = await api.request(`/api/resolve?ref=${encodeURIComponent(required(action, "\u53CC\u94FE\u6216\u5F15\u7528"))}`);
   else if (command === "api") {
@@ -408,7 +409,7 @@ async function main() {
     if (!path.startsWith("/api/")) path = `/api/${path.replace(/^\//, "")}`;
     const method = (val(flags, "method") ?? (Object.keys(fields).length ? "POST" : "GET")).toUpperCase();
     data = await api.request(path, method, method === "GET" ? void 0 : fields);
-  } else throw new Error("\u672A\u77E5\u547D\u4EE4\u3002\u8FD0\u884C li --help \u67E5\u770B\u7528\u6CD5\u3002");
+  } else throw new Error("\u672A\u77E5\u547D\u4EE4\u3002\u8FD0\u884C local-issues --help \u67E5\u770B\u7528\u6CD5\u3002");
   if (flags.web && !shared) {
     const target = data?.kind === "repo" ? void 0 : data?.issue?.id ?? data?.project?.id ?? data?.id ?? ref;
     if (target) await api.request("/api/open", "POST", { ref: target });
@@ -418,6 +419,6 @@ async function main() {
   print(data, flags, command);
 }
 void main().catch((error) => {
-  console.error(`li: ${error instanceof Error ? error.message : "\u64CD\u4F5C\u5931\u8D25"}`);
+  console.error(`local-issues: ${error instanceof Error ? error.message : "\u64CD\u4F5C\u5931\u8D25"}`);
   process.exitCode = 1;
 });

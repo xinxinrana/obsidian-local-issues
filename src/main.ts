@@ -1,12 +1,11 @@
 import { App, FileSystemAdapter, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, normalizePath } from 'obsidian';
 import { randomBytes } from 'node:crypto';
+import { agentSkill } from './agent-skill';
 import { ResourceRoutes, slug } from './routes';
 import { Store } from './store';
 import { startApi } from './api';
 import { IssuesView, VIEW_TYPE, type ViewHost } from './view';
 import type { VaultAdapter } from './types';
-
-const shellQuote = (value: string): string => "'" + value.replace(/'/g, "'\\''") + "'";
 
 interface Settings {
   root: string;
@@ -44,7 +43,7 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
     this.registerView(VIEW_TYPE, leaf => new IssuesView(leaf, this));
     this.addRibbonIcon('list-todo', 'Local Issues：项目', () => { void this.activate().catch(this.report); });
     this.addCommand({ id: 'open-projects', name: '打开项目', callback: () => { void this.activate().catch(this.report); } });
-    this.addCommand({ id: 'copy-cli', name: '复制 Agent CLI 命令', callback: () => { void this.copyCli(); } });
+    this.addCommand({ id: 'copy-cli', name: '复制 Agent CLI 使用说明', callback: () => { void this.copyCli(); } });
     this.addCommand({ id: 'open-current-issue', name: '在项目中打开当前 Issue 笔记', checkCallback: checking => {
       const file = this.app.workspace.getActiveFile();
       if (!file || !file.path.startsWith(`${this.settings.root}/`)) return false;
@@ -190,8 +189,8 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
   async copyCli(): Promise<void> {
     try {
       const path = await this.cliPath();
-      await navigator.clipboard.writeText(`node ${shellQuote(path)} --help`);
-      new Notice('已复制 Agent CLI 命令；在终端粘贴即可查看用法');
+      await navigator.clipboard.writeText(agentSkill(path, this.server?.port ?? this.settings.port));
+      new Notice('已复制工具说明与极简 Skill，粘贴给 Agent 即可');
     } catch (error) { this.report(error); }
   }
 
@@ -226,7 +225,7 @@ class LocalIssuesSettings extends PluginSettingTab {
         p.settings.port = +value; await p.saveSettings();
       })).addButton(b => b.setButtonText('应用端口').onClick(async () => { await p.restartApi(); this.display(); }));
     const cliDescription = document.createDocumentFragment();
-    cliDescription.append('独立 CLI 支持项目、Issue、评论和 JSON 输出。社区商店安装后需另行下载 cli.mjs。');
+    cliDescription.append('复制内容包含工具用途、链接识别规则与 CLI 用法，可直接交给 Agent 或保存为 SKILL.md。社区商店安装后需另行下载 cli.mjs。');
     const cliDownload = document.createElement('a');
     cliDownload.href = 'https://github.com/xinxinrana/obsidian-local-issues/releases/latest';
     cliDownload.textContent = '下载 CLI'; cliDownload.rel = 'noopener noreferrer';

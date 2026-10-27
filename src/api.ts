@@ -26,7 +26,7 @@ function pick<T>(data: Record<string, unknown>, names: string[]): T {
   return result as T;
 }
 const PROJECT_FIELDS = ['title', 'description', 'status', 'dueDate'];
-const ISSUE_FIELDS = ['title', 'body', 'status', 'labels', 'milestone', 'assignees', 'parent', 'dependencies', 'dueDate', 'author'];
+const ISSUE_FIELDS = ['title', 'body', 'status', 'closeReason', 'labels', 'milestone', 'assignees', 'parent', 'dependencies', 'dueDate', 'author'];
 function issueUpdate(body: Record<string, unknown>): IssuePatch {
   return { ...pick<IssuePatch>(body, ISSUE_FIELDS.filter(k => k !== 'author')), actor: typeof body.actor === 'string' ? body.actor : typeof body.author === 'string' ? body.author : 'Agent' };
 }
@@ -113,7 +113,7 @@ export async function startApi(options: ApiOptions): Promise<{ close: () => Prom
       const url = new URL(req.url ?? '/', `http://127.0.0.1:${actualPort}`);
       let parts = url.pathname.split('/').filter(Boolean).map(x => { try { return decodeURIComponent(x); } catch { throw new HttpError(400, '地址编码不正确。'); } });
       const method = req.method ?? 'GET';
-      if (method === 'GET' && url.pathname === '/api/health') { send(res, 200, { ok: true, data: { name: 'Local Issues', version: '0.1.5' } }); return; }
+      if (method === 'GET' && url.pathname === '/api/health') { send(res, 200, { ok: true, data: { name: 'Local Issues', version: '0.1.6' } }); return; }
       const shared = parts[0] === 'api' && parts[1] === 'shares' && !!parts[2];
       const resource = parseResource(url);
       if (resource) {
@@ -181,7 +181,7 @@ export async function startApi(options: ApiOptions): Promise<{ close: () => Prom
           else if (parts.length === 4 && method === 'POST') {
             const body = await readBody(req);
             if (parts[3] === 'comments') { data = await store.addComment(issue.id, str(body.body, 'body'), typeof body.author === 'string' ? body.author : 'Agent'); status = 201; }
-            else if (parts[3] === 'close' || parts[3] === 'reopen') data = await store.updateIssue(issue.id, { status: parts[3] === 'close' ? 'closed' : 'open', actor: typeof body.actor === 'string' ? body.actor : typeof body.author === 'string' ? body.author : 'Agent' }, expected(req, body));
+            else if (parts[3] === 'close' || parts[3] === 'reopen') data = await store.updateIssue(issue.id, { status: parts[3] === 'close' ? 'closed' : 'open', ...(typeof body.closeReason === 'string' && parts[3] === 'close' ? { closeReason: body.closeReason as IssuePatch['closeReason'] } : {}), actor: typeof body.actor === 'string' ? body.actor : typeof body.author === 'string' ? body.author : 'Agent' }, expected(req, body));
             else if (parts[3] === 'attachments') {
               const name = str(body.name, 'name'), base64 = str(body.base64, 'base64');
               if (!/^[A-Za-z0-9+/]*={0,2}$/.test(base64) || base64.length % 4 !== 0) throw new HttpError(400, '附件必须是有效 base64。');

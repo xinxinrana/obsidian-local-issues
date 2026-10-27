@@ -23,23 +23,23 @@
 
 ## Agent 使用
 
-在 Obsidian 中启用 Local Issues 的本地 API。CLI 需要 Node.js 22 或以上；安装 `cli.mjs` 后，可使用已配置的 `li` 命令，也可用 `node '/路径/cli.mjs'` 代替 `li`。
+在 Obsidian 中启用 Local Issues 的本地 API。CLI 需要 Node.js 22 或以上；从源码目录运行 `npm install -g .` 后，可使用 `local-issues` 命令（支持 Windows），也可用 `node '/路径/cli.mjs'` 代替 `local-issues`。
 
 ```sh
-li view '<任意资源链接>' --json
-li repo view 'http://localhost:27183/' --json
-li project view 'http://localhost:27183/local-issues' --json
-li issue list 'http://localhost:27183/local-issues/issues?state=open' --json
-li issue view 'http://localhost:27183/local-issues/issues/5' --json
+local-issues view '<任意资源链接>' --json
+local-issues repo view 'http://localhost:27183/' --json
+local-issues project view 'http://localhost:27183/local-issues' --json
+local-issues issue list 'http://localhost:27183/local-issues/issues?state=open' --json
+local-issues issue view 'http://localhost:27183/local-issues/issues/5' --json
 ```
 
-`li view` 自动识别仓库、项目、列表或议题。修改、评论、关闭沿用同一议题链接：
+`local-issues view` 自动识别仓库、项目、列表或议题。修改、评论、关闭沿用同一议题链接：
 
 ```sh
-li issue edit '<议题链接>' --body-file description.md --if-match '<revision>'
-li issue comment '<议题链接>' --body-file reply.md
-li issue close '<议题链接>'
-li issue reopen '<议题链接>'
+local-issues issue edit '<议题链接>' --body-file description.md --if-match '<revision>'
+local-issues issue comment '<议题链接>' --body-file reply.md
+local-issues issue close '<议题链接>' --reason completed
+local-issues issue reopen '<议题链接>'
 ```
 
 `--json number,title,body,comments,revision` 选择字段；`--comments` 显示评论与状态时间线；`--body-file -` 从标准输入读取正文。读取 revision 后使用 `--if-match` 可检测并发覆盖。
@@ -49,3 +49,5 @@ li issue reopen '<议题链接>'
 ## 参考
 
 沿用 GitHub CLI 的对象、动作、编号或 URL 和选项结构：[gh issue view](https://cli.github.com/manual/gh_issue_view)、[gh issue edit](https://cli.github.com/manual/gh_issue_edit)、[gh issue comment](https://cli.github.com/manual/gh_issue_comment)。
+
+关闭原因可选 `completed`（完成）、`on-hold`（搁置）或 `not-planned`（不做），默认为 `completed`。

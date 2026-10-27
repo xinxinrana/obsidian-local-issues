@@ -30,6 +30,8 @@ GitHub Issues 的本地 Obsidian 版。一个笔记库可以有多个项目，�
 
 1. 从 Release 下载 `cli.mjs`。放到插件目录后，可在插件设置点击 **复制 CLI 命令**；也可以放在其他目录，并使用 `--vault` 指定笔记库。
 2. 在插件设置中启用 **本地 Agent API**。全新安装时默认关闭。
+“复制 CLI 命令”会复制一份极简 Skill，包含工具用途、当前端口的链接识别规则和 CLI 示例，可粘贴给 agent，或保存为 `local-issues/SKILL.md`。
+
 3. 运行 `node cli.mjs --vault "/笔记库路径" --help`。
 
 CLI 目前按默认 `.obsidian` 配置目录定位 API 设置。完整命令见 [English README](README.md#agent-cli)。
@@ -37,19 +39,19 @@ CLI 目前按默认 `.obsidian` 配置目录定位 API 设置。完整命令见 
 分享内容是可读的语义化链接，例如 `http://localhost:27183/local-issues/issues/5`，人能看懂仓库、项目、议题编号，agent 用 CLI 直接读取。仓库首页、项目、Issues 列表和具体议题均可复制对应链接；列表链接保留筛选参数。无需登录或密钥。
 
 ```sh
-li view '<资源链接>' --json
-li issue list '<Issues 列表链接>' --json
-li issue view '<议题链接>' --comments
-li issue edit '<议题链接>' --body-file description.md
-li issue comment '<议题链接>' --body-file reply.md
-li issue close '<议题链接>'
+local-issues view '<资源链接>' --json
+local-issues issue list '<Issues 列表链接>' --json
+local-issues issue view '<议题链接>' --comments
+local-issues issue edit '<议题链接>' --body-file description.md
+local-issues issue comment '<议题链接>' --body-file reply.md
+local-issues issue close '<议题链接>'
 ```
 
-上例 `li` 可替换为 `node '/路径/cli.mjs'`。详细路由与命令见[链接与 CLI 使用说明](docs/agent-cli.zh-CN.md)。
+从源码目录运行 `npm install -g .` 后可使用 `local-issues` 命令（Windows 也适用）。上例 `local-issues` 可替换为 `node '/路径/cli.mjs'`。详细路由与命令见[链接与 CLI 使用说明](docs/agent-cli.zh-CN.md)。
 
 ## 文件和隐私
 
-默认笔记目录为 `Local Issues/`，每个项目包含 `project.md`、`issues/` 和 `timeline/`。附件放在 `resource/local-issues/`。停用插件后仍可直接阅读与编辑。修改时请保留 `id`、`type`、`projectId` 和 `issueId`；Issue 状态为 `open`、`in-progress`、`closed`。
+默认笔记目录为 `Local Issues/`，每个项目包含 `project.md`、`issues/` 和 `timeline/`。附件放在 `resource/local-issues/`。停用插件后仍可直接阅读与编辑。修改时请保留 `id`、`type`、`projectId` 和 `issueId`；Issue 状态为 `open` 或 `closed`；关闭原因 `closeReason` 为 `completed`、`on-hold` 或 `not-planned`。旧的 `in-progress` 会按开启读取。
 
 无需账号、订阅或付费，没有遥测。插件不会请求远程服务。本地 API 仅监听 `127.0.0.1`，默认端口 `27183`；CLI 仅连接本机地址。本地服务无需凭据，拒绝浏览器跨域请求。
 
