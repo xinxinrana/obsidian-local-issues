@@ -4,13 +4,13 @@
 
 | 链接路径 | 指向 |
 | --- | --- |
-| `/repos/obsidian` | 当前笔记库，即本地仓库 |
-| `/repos/obsidian/projects/local-issues` | 一个项目 |
-| `/repos/obsidian/projects/local-issues/issues` | 项目的议题列表 |
-| `/repos/obsidian/projects/local-issues/issues?state=open&label=bug` | 项目内未关闭、标签为 bug 的议题 |
-| `/repos/obsidian/projects/local-issues/issues/5` | 项目内第 5 条议题 |
+| `/` | 当前笔记库，即本地仓库 |
+| `/local-issues` | 一个项目 |
+| `/local-issues/issues` | 项目的议题列表 |
+| `/local-issues/issues?state=open&label=bug` | 项目内未关闭、标签为 bug 的议题 |
+| `/local-issues/issues/5` | 项目内第 5 条议题 |
 
-完整地址以 `http://127.0.0.1:27183` 开头。`obsidian` 来自笔记库名称，`local-issues` 来自项目名称；中文名称保留中文，重名时添加数字后缀。项目链接名首次生成后固定，修改项目标题仍可访问原链接。
+完整地址以 `http://localhost:27183` 开头。`local-issues` 来自项目名称；中文名称保留中文，重名时添加数字后缀。项目链接名首次生成后固定，修改项目标题仍可访问原链接。
 
 ## 复制链接
 
@@ -27,10 +27,10 @@
 
 ```sh
 li view '<任意资源链接>' --json
-li repo view 'http://127.0.0.1:27183/repos/obsidian' --json
-li project view 'http://127.0.0.1:27183/repos/obsidian/projects/local-issues' --json
-li issue list 'http://127.0.0.1:27183/repos/obsidian/projects/local-issues/issues?state=open' --json
-li issue view 'http://127.0.0.1:27183/repos/obsidian/projects/local-issues/issues/5' --json
+li repo view 'http://localhost:27183/' --json
+li project view 'http://localhost:27183/local-issues' --json
+li issue list 'http://localhost:27183/local-issues/issues?state=open' --json
+li issue view 'http://localhost:27183/local-issues/issues/5' --json
 ```
 
 `li view` 自动识别仓库、项目、列表或议题。修改、评论、关闭沿用同一议题链接：

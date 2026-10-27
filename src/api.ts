@@ -113,7 +113,7 @@ export async function startApi(options: ApiOptions): Promise<{ close: () => Prom
       const url = new URL(req.url ?? '/', `http://127.0.0.1:${actualPort}`);
       let parts = url.pathname.split('/').filter(Boolean).map(x => { try { return decodeURIComponent(x); } catch { throw new HttpError(400, '地址编码不正确。'); } });
       const method = req.method ?? 'GET';
-      if (method === 'GET' && url.pathname === '/api/health') { send(res, 200, { ok: true, data: { name: 'Local Issues', version: '0.1.4' } }); return; }
+      if (method === 'GET' && url.pathname === '/api/health') { send(res, 200, { ok: true, data: { name: 'Local Issues', version: '0.1.5' } }); return; }
       const shared = parts[0] === 'api' && parts[1] === 'shares' && !!parts[2];
       const resource = parseResource(url);
       if (resource) {
@@ -152,7 +152,7 @@ export async function startApi(options: ApiOptions): Promise<{ close: () => Prom
         } else throw new HttpError(404, '分享接口不存在。', 'NOT_FOUND');
       } else if (parts[1] === 'links' && parts.length === 2 && method === 'GET') {
         const path = await routes.path(store, url.searchParams.get('ref') ?? undefined, url.searchParams.get('scope') === 'issues' ? 'issues' : undefined);
-        data = { url: `http://127.0.0.1:${actualPort}${decodeURI(path)}` };
+        data = { url: `http://localhost:${actualPort}${decodeURI(path)}` };
       } else if (parts[1] === 'projects') {
         if (parts.length === 2 && method === 'GET') {
           const snap = await store.snapshot();

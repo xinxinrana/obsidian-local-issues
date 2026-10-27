@@ -35,7 +35,7 @@ test('API loopback Host, browser rejection and legacy target routes', async () =
   const f = await fixture();
   try {
     const health = await fetch(`${f.url}/api/health`); assert.equal(health.status, 200);
-    assert.deepEqual(await health.json(), { ok: true, data: { name: 'Local Issues', version: '0.1.4' } });
+    assert.deepEqual(await health.json(), { ok: true, data: { name: 'Local Issues', version: '0.1.5' } });
     assert.equal((await fetch(`${f.url}/api/projects`)).status, 200);
     const invalidHost = await new Promise<number>((resolve, reject) => {
       const req = httpRequest(`${f.url}/api/projects`, { headers: { Host: 'evil.test' } }, res => { res.resume(); resolve(res.statusCode!); }); req.on('error', reject); req.end();
@@ -102,8 +102,11 @@ test('semantic resource URLs identify repo, project, list and issue without cred
     const p = await f.store.createProject({ title: 'Local Issues' });
     const one = await f.store.createIssue(p.id, { title: 'One', labels: ['bug'] });
     const link = (await f.request(`/api/links?ref=${one.id}`)).data.url;
-    assert.equal(link, `${f.url}/repos/tests/projects/local-issues/issues/1`);
+    assert.equal(link, `${f.url.replace('127.0.0.1', 'localhost')}/local-issues/issues/1`);
     assert.equal(new URL(link).search, '');
+    const oldLink = `${f.url}/repos/tests/projects/local-issues/issues/1`;
+    assert.equal((await f.request(oldLink)).data.issue.id, one.id);
+    assert.equal((await f.request(f.url + '/')).data.kind, 'repo');
     const other = await f.store.createProject({ title: 'Local-Issues' });
     const two = await f.store.createIssue(other.id, { title: 'Other project' });
     assert.equal((await fetch(link)).status, 200);
@@ -125,6 +128,8 @@ test('semantic resource URLs identify repo, project, list and issue without cred
     assert.equal((await f.request(`${f.url}/repos/wrong/projects/local-issues/issues/1`)).status, 404);
     assert.equal((await f.request(`${projectUrl}/issues/999`)).status, 404);
     assert.equal((await f.request(`${projectUrl}/issues/0`)).status, 400);
+    const reserved = await f.store.createProject({ title: 'API' });
+    assert.match((await f.request(`/api/links?ref=${reserved.id}`)).data.url, /\/api-project$/);
     const chinese = await f.store.createProject({ title: '产品 / 设计 #方案' });
     const chineseUrl = (await f.request(`/api/links?ref=${chinese.id}`)).data.url;
     assert.match(chineseUrl, /产品-设计-方案/);

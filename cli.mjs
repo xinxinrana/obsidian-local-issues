@@ -27,15 +27,22 @@ SOFTWARE.
 // src/routes.ts
 function parseResource(url) {
   const p = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
-  if (p[0] !== "repos") return void 0;
-  if (!p[1] || url.username || url.password || url.hash) throw new Error("\u4ED3\u5E93\u94FE\u63A5\u683C\u5F0F\u4E0D\u6B63\u786E\u3002");
-  if (p.length === 2) return { kind: "repo", repo: p[1], suffix: [] };
-  if (p[2] !== "projects" || !p[3]) throw new Error("\u9879\u76EE\u94FE\u63A5\u683C\u5F0F\u4E0D\u6B63\u786E\u3002");
-  if (p.length === 4) return { kind: "project", repo: p[1], project: p[3], suffix: [] };
-  if (p[4] !== "issues") throw new Error("\u8BAE\u9898\u94FE\u63A5\u683C\u5F0F\u4E0D\u6B63\u786E\u3002");
-  if (p.length === 5) return { kind: "issues", repo: p[1], project: p[3], suffix: [] };
-  if (!/^[1-9]\d*$/.test(p[5]) || !Number.isSafeInteger(Number(p[5]))) throw new Error("\u8BAE\u9898\u7F16\u53F7\u5FC5\u987B\u662F\u6B63\u6574\u6570\u3002");
-  return { kind: "issue", repo: p[1], project: p[3], number: Number(p[5]), suffix: p.slice(6) };
+  if (p[0] === "api") return void 0;
+  if (url.username || url.password || url.hash) throw new Error("\u8D44\u6E90\u94FE\u63A5\u683C\u5F0F\u4E0D\u6B63\u786E\u3002");
+  let repo = "";
+  if (p[0] === "repos") {
+    if (!p[1]) throw new Error("\u4ED3\u5E93\u94FE\u63A5\u683C\u5F0F\u4E0D\u6B63\u786E\u3002");
+    repo = p[1];
+    if (p.length === 2) return { kind: "repo", repo, suffix: [] };
+    if (p[2] !== "projects" || !p[3]) throw new Error("\u9879\u76EE\u94FE\u63A5\u683C\u5F0F\u4E0D\u6B63\u786E\u3002");
+    p.splice(0, 3);
+  }
+  if (!p.length) return { kind: "repo", repo, suffix: [] };
+  if (p.length === 1) return { kind: "project", repo, project: p[0], suffix: [] };
+  if (p[1] !== "issues") throw new Error("\u8BAE\u9898\u94FE\u63A5\u683C\u5F0F\u4E0D\u6B63\u786E\u3002");
+  if (p.length === 2) return { kind: "issues", repo, project: p[0], suffix: [] };
+  if (!/^[1-9]\d*$/.test(p[2]) || !Number.isSafeInteger(Number(p[2]))) throw new Error("\u8BAE\u9898\u7F16\u53F7\u5FC5\u987B\u662F\u6B63\u6574\u6570\u3002");
+  return { kind: "issue", repo, project: p[0], number: Number(p[2]), suffix: p.slice(3) };
 }
 
 // src/cli.ts
@@ -150,7 +157,8 @@ function findVault(explicit) {
 }
 function localUrl(value) {
   const url = new URL(value);
-  if (url.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) || url.username || url.password) throw new Error("\u4EC5\u652F\u6301 http://127.0.0.1 \u7684\u672C\u673A\u63A5\u53E3\u4E0E\u5206\u4EAB\u94FE\u63A5\u3002");
+  if (url.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) || url.username || url.password) throw new Error("\u4EC5\u652F\u6301 localhost \u6216\u56DE\u73AF\u5730\u5740\u7684\u672C\u673A\u63A5\u53E3\u4E0E\u5206\u4EAB\u94FE\u63A5\u3002");
+  if (url.hostname === "localhost") url.hostname = "127.0.0.1";
   return url;
 }
 function client(f, shared, resource) {
@@ -174,7 +182,7 @@ function client(f, shared, resource) {
     headers[header.slice(0, colon)] = header.slice(colon + 1).trim();
   }
   return { async request(path, method = "GET", value) {
-    const url = new URL(path, baseUrl);
+    const url = localUrl(new URL(path, baseUrl).toString());
     if (url.origin !== baseUrl.origin) throw new Error("\u63A5\u53E3\u5730\u5740\u5FC5\u987B\u4FDD\u6301\u540C\u4E00\u672C\u673A\u670D\u52A1\u3002");
     let response;
     try {

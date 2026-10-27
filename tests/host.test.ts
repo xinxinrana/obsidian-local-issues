@@ -74,7 +74,7 @@ test('bundled plugin registers native entry points; Vault adapter, protocol, API
     const response = await fetch(share); const result: any = await response.json();
     assert.equal(result.data.issue.id, i.id);
     assert.match(result.data.issue.body, /外部刚保存/);
-    assert.match(await plugin.resourceLink(i.id), /\/repos\/tests\/projects\/.+\/issues\/1$/);
+    assert.match(await plugin.resourceLink(i.id), /^http:\/\/localhost:\d+\/.+\/issues\/1$/);
     await plugin.copyCli();
     assert.equal(clipboard.length, 0, 'A community installation must not copy a command for a missing CLI file');
     assert.ok(mock.notices.some((message: string) => message.includes('下载独立的 cli.mjs')));
@@ -82,7 +82,7 @@ test('bundled plugin registers native entry points; Vault adapter, protocol, API
     await plugin.copyCli();
     assert.match(clipboard[0], /node .*cli\.mjs.* --help/);
     assert.match(await plugin.resourceLink(i.id), /\/issues\/1$/);
-    assert.match(await plugin.resourceLink(p.id), /\/repos\/tests\/projects\//);
+    assert.match(await plugin.resourceLink(p.id), /^http:\/\/localhost:\d+\/[^/]+$/);
     plugin.openSettings(); assert.match(mock.modals.at(-1).contentEl.textContent, /本地 Agent API/);
     mock.modals.at(-1).close();
     plugin.settings.apiEnabled = false;

@@ -81,7 +81,7 @@ test('CLI gh-style lifecycle, JSON selection, stdin, files, attachments and shar
     const bad = await run(['issue', 'edit', created.id, '-t', 'Should not apply', '--if-match', 'stale']); assert.equal(bad.code, 1); assert.match(bad.stderr, /CONFLICT/);
     const invalid = await run(['issue', 'list', '--mystery']); assert.equal(invalid.code, 1); assert.match(invalid.stderr, /未知选项/);
     const resourceLink = await json(['issue', 'share', created.id]);
-    assert.match(resourceLink.url, /\/repos\/tests\/projects\/cli-项目\/issues\/1$/);
+    assert.match(resourceLink.url, /^http:\/\/localhost:\d+\/cli-项目\/issues\/1$/);
     assert.equal(new URL(resourceLink.url).search, '');
     const resourceView = await json(['view', resourceLink.url]); assert.equal(resourceView.id, created.id);
     const resourceNoAuth = await run(['view', resourceLink.url, '--json'], undefined, false);
@@ -100,7 +100,12 @@ test('CLI gh-style lifecycle, JSON selection, stdin, files, attachments and shar
     assert.equal((await json(['repo', 'view', repoUrl.url])).projects[0].id, project.id);
     assert.equal((await run(['project', 'view', resourceLink.url])).code, 1);
     assert.equal((await run(['issue', 'view', listUrl])).code, 1);
-    const wrongOrigin = resourceLink.url.replace('127.0.0.1', 'localhost');
+    const ipv4Url = resourceLink.url.replace('localhost', '127.0.0.1');
+    assert.equal((await json(['view', ipv4Url])).id, created.id);
+    const legacyUrl = new URL(ipv4Url); legacyUrl.pathname = '/repos/tests/projects/cli-项目/issues/1';
+    assert.equal((await json(['view', legacyUrl.toString()])).id, created.id);
+    const wrongPort = new URL(resourceLink.url); wrongPort.port = String(Number(wrongPort.port) + 1);
+    const wrongOrigin = wrongPort.toString();
     assert.match((await run(['view', wrongOrigin])).stderr, /同一本机服务/);
     const projectShare = (await f.request('/api/shares', 'POST', { ref: project.id })).data;
     assert.equal((await run(['share', 'edit', projectShare.url, '-b', 'Shared project description'], undefined, false)).code, 0);

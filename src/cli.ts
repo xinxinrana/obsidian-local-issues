@@ -100,7 +100,8 @@ function findVault(explicit?: string): string | undefined {
 }
 function localUrl(value: string): URL {
   const url = new URL(value);
-  if (url.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) || url.username || url.password) throw new Error('仅支持 http://127.0.0.1 的本机接口与分享链接。');
+  if (url.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) || url.username || url.password) throw new Error('仅支持 localhost 或回环地址的本机接口与分享链接。');
+  if (url.hostname === 'localhost') url.hostname = '127.0.0.1';
   return url;
 }
 interface Client { request(path: string, method?: string, value?: unknown): Promise<any> }
@@ -120,7 +121,7 @@ function client(f: Flags, shared?: URL, resource?: URL): Client {
   const match = val(f, 'if-match'); if (match) headers['If-Match'] = match;
   for (const header of list(f, 'header') ?? []) { const colon = header.indexOf(':'); if (colon <= 0) throw new Error('-H 格式为 Name: value'); headers[header.slice(0, colon)] = header.slice(colon + 1).trim(); }
   return { async request(path, method = 'GET', value) {
-    const url = new URL(path, baseUrl);
+    const url = localUrl(new URL(path, baseUrl).toString());
     if (url.origin !== baseUrl.origin) throw new Error('接口地址必须保持同一本机服务。');
     let response: Response;
     try { response = await fetch(url, { method, headers, body: value === undefined ? undefined : JSON.stringify(value), signal: AbortSignal.timeout(30000) }); }

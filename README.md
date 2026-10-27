@@ -57,10 +57,10 @@ li issue reopen 1 -P 'My project'
 Choose **分享给 Agent** to copy a readable resource URL, such as:
 
 ```text
-http://127.0.0.1:27183/repos/obsidian
-http://127.0.0.1:27183/repos/obsidian/projects/local-issues
-http://127.0.0.1:27183/repos/obsidian/projects/local-issues/issues?state=open
-http://127.0.0.1:27183/repos/obsidian/projects/local-issues/issues/5
+http://localhost:27183/
+http://localhost:27183/local-issues
+http://localhost:27183/local-issues/issues?state=open
+http://localhost:27183/local-issues/issues/5
 ```
 
 The repository is the current vault. Project URL names remain stable after title edits. **复制 Issues 列表链接** preserves the current list filters. Links contain no executable commands or credentials. No login or keys are required.

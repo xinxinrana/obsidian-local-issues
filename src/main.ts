@@ -153,7 +153,7 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
 
   async resourceLink(ref?: string, scope?: 'issues'): Promise<string> {
     if (!this.server) throw new Error('请先在 Local Issues 设置中启用本地 Agent API');
-    return `http://127.0.0.1:${this.server.port}${decodeURI(await this.routes.path(this.store, ref, scope))}`;
+    return `http://localhost:${this.server.port}${decodeURI(await this.routes.path(this.store, ref, scope))}`;
   }
 
   private async cliPath(): Promise<string> {

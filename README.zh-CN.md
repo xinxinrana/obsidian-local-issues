@@ -34,7 +34,7 @@ GitHub Issues 的本地 Obsidian 版。一个笔记库可以有多个项目，�
 
 CLI 目前按默认 `.obsidian` 配置目录定位 API 设置。完整命令见 [English README](README.md#agent-cli)。
 
-分享内容是可读的语义化链接，例如 `http://127.0.0.1:27183/repos/obsidian/projects/local-issues/issues/5`，人能看懂仓库、项目、议题编号，agent 用 CLI 直接读取。仓库首页、项目、Issues 列表和具体议题均可复制对应链接；列表链接保留筛选参数。无需登录或密钥。
+分享内容是可读的语义化链接，例如 `http://localhost:27183/local-issues/issues/5`，人能看懂仓库、项目、议题编号，agent 用 CLI 直接读取。仓库首页、项目、Issues 列表和具体议题均可复制对应链接；列表链接保留筛选参数。无需登录或密钥。
 
 ```sh
 li view '<资源链接>' --json
