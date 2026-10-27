@@ -145,10 +145,12 @@ export async function startApi(options: ApiOptions): Promise<{ close: () => Prom
           } else throw new HttpError(405, '此分享入口支持 GET 和 PATCH。', 'METHOD_NOT_ALLOWED');
         } else if (parts.length === 4 && parts[3] === 'comments' && method === 'POST' && resolved.kind === 'issue') {
           const body = await readBody(req); data = await store.addComment(resolved.value.id, str(body.body, 'body'), typeof body.author === 'string' ? body.author : 'Agent'); status = 201;
-        } else if (parts.length === 5 && parts[3] === 'comments' && method === 'PATCH' && resolved.kind === 'issue') {
+        } else if (parts.length === 5 && parts[3] === 'comments' && (method === 'PATCH' || method === 'DELETE') && resolved.kind === 'issue') {
           const entry = (await store.snapshot()).timeline.find(item => item.id === parts[4] && item.issueId === resolved.value.id && item.kind === 'comment');
           if (!entry) throw new HttpError(403, '此评论不属于分享的 Issue。', 'FORBIDDEN');
-          const body = await readBody(req); data = await store.editComment(entry.id, str(body.body, 'body'), expected(req, body));
+          const body = await readBody(req);
+          if (method === 'DELETE') { await store.deleteComment(entry.id, expected(req, body)); data = { deleted: true }; }
+          else data = await store.editComment(entry.id, str(body.body, 'body'), expected(req, body));
         } else throw new HttpError(404, '分享接口不存在。', 'NOT_FOUND');
       } else if (parts[1] === 'links' && parts.length === 2 && method === 'GET') {
         const path = await routes.path(store, url.searchParams.get('ref') ?? undefined, url.searchParams.get('scope') === 'issues' ? 'issues' : undefined);
@@ -194,6 +196,8 @@ export async function startApi(options: ApiOptions): Promise<{ close: () => Prom
         } else throw new HttpError(404, 'Issue 接口不存在。', 'NOT_FOUND');
       } else if (parts[1] === 'comments' && parts.length === 3 && method === 'PATCH') {
         const body = await readBody(req); data = await store.editComment(parts[2], str(body.body, 'body'), expected(req, body));
+      } else if (parts[1] === 'comments' && parts.length === 3 && method === 'DELETE') {
+        const body = await readBody(req); await store.deleteComment(parts[2], expected(req, body)); data = { deleted: true };
       } else if (parts[1] === 'open' && parts.length === 2 && method === 'POST' && options.open) {
         const body = await readBody(req); await options.open(str(body.ref, 'ref')); data = { opened: true };
       } else if (parts[1] === 'resolve' && parts.length === 2 && method === 'GET') {

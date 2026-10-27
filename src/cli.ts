@@ -15,6 +15,7 @@ const HELP = `Local Issues · Obsidian 本地项目与 Issues
   issue comment <引用> | close <引用> | reopen <引用>
   issue attach <引用> <文件> | share <引用>
   comment edit <评论ID> --body "内容"
+  comment delete <评论ID>
   share view <分享URL> | edit <分享URL> | comment <分享URL>
   share comment-edit <分享URL> <评论ID> --body "内容"
   resolve '[[笔记或Issue]]'
@@ -260,6 +261,7 @@ async function main(): Promise<void> {
     } else if (action === 'share') { const current = await api.request(issuePath(required(ref, 'Issue 引用'))); data = await api.request(`/api/links?ref=${encodeURIComponent(current.issue.id)}`); }
     else throw new Error('未知 Issue 命令。运行 local-issues --help 查看用法。');
   } else if (command === 'comment' && action === 'edit') data = await api.request(`/api/comments/${encodeURIComponent(required(ref, '评论 ID'))}`, 'PATCH', { body: required(body(flags), '评论正文（--body 或 --body-file）') });
+  else if (command === 'comment' && action === 'delete') data = await api.request(`/api/comments/${encodeURIComponent(required(ref, '评论 ID'))}`, 'DELETE');
   else if (command === 'resolve') data = await api.request(`/api/resolve?ref=${encodeURIComponent(required(action, '双链或引用'))}`);
   else if (command === 'api') {
     const fields: Record<string, unknown> = {};

@@ -20,6 +20,7 @@ test('live Markdown preserves source while editing links, images and code, and r
   try {
     const editor = module.exports.createLiveMarkdown(app, parent, initial, 'issue.md', (value: string) => changes.push(value));
     assert.equal(editor.state.doc.toString(), initial);
+    assert.ok(editor.contentDOM.classList.contains('cm-lineWrapping'), '已有正文和新输入均自动换行');
     assert.equal(parent.querySelector('.li-live-link')?.textContent, '显示名称');
     assert.ok(parent.querySelector('.li-live-strong'), '加粗内容直接呈现');
     assert.equal(parent.querySelector('.li-live-image')?.getAttribute('src'), 'app://local/image.png');

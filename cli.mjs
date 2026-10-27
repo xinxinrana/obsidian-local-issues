@@ -59,6 +59,7 @@ var HELP = `Local Issues \xB7 Obsidian \u672C\u5730\u9879\u76EE\u4E0E Issues
   issue comment <\u5F15\u7528> | close <\u5F15\u7528> | reopen <\u5F15\u7528>
   issue attach <\u5F15\u7528> <\u6587\u4EF6> | share <\u5F15\u7528>
   comment edit <\u8BC4\u8BBAID> --body "\u5185\u5BB9"
+  comment delete <\u8BC4\u8BBAID>
   share view <\u5206\u4EABURL> | edit <\u5206\u4EABURL> | comment <\u5206\u4EABURL>
   share comment-edit <\u5206\u4EABURL> <\u8BC4\u8BBAID> --body "\u5185\u5BB9"
   resolve '[[\u7B14\u8BB0\u6216Issue]]'
@@ -392,6 +393,7 @@ async function main() {
       data = await api.request(`/api/links?ref=${encodeURIComponent(current.issue.id)}`);
     } else throw new Error("\u672A\u77E5 Issue \u547D\u4EE4\u3002\u8FD0\u884C local-issues --help \u67E5\u770B\u7528\u6CD5\u3002");
   } else if (command === "comment" && action === "edit") data = await api.request(`/api/comments/${encodeURIComponent(required(ref, "\u8BC4\u8BBA ID"))}`, "PATCH", { body: required(body(flags), "\u8BC4\u8BBA\u6B63\u6587\uFF08--body \u6216 --body-file\uFF09") });
+  else if (command === "comment" && action === "delete") data = await api.request(`/api/comments/${encodeURIComponent(required(ref, "\u8BC4\u8BBA ID"))}`, "DELETE");
   else if (command === "resolve") data = await api.request(`/api/resolve?ref=${encodeURIComponent(required(action, "\u53CC\u94FE\u6216\u5F15\u7528"))}`);
   else if (command === "api") {
     const fields = {};

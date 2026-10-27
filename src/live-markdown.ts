@@ -52,5 +52,5 @@ export function createLiveMarkdown(app: App, parent: HTMLElement, value: string,
     constructor(view: EditorView) { this.decorations = decorations(view, app, sourcePath); }
     update(update: ViewUpdate) { if (update.docChanged || update.selectionSet || update.viewportChanged) this.decorations = decorations(update.view, app, sourcePath); }
   }, { decorations: v => v.decorations });
-  return new EditorView({ parent, state: EditorState.create({ doc: value, extensions: [markdown(), history(), keymap.of([...defaultKeymap, ...historyKeymap]), extension, EditorView.contentAttributes.of({ 'aria-label': 'Markdown 内容' }), EditorView.updateListener.of(update => { if (update.docChanged) onChange(update.state.doc.toString()); })] }) });
+  return new EditorView({ parent, state: EditorState.create({ doc: value, extensions: [markdown(), history(), EditorView.lineWrapping, keymap.of([...defaultKeymap, ...historyKeymap]), extension, EditorView.contentAttributes.of({ 'aria-label': 'Markdown 内容' }), EditorView.updateListener.of(update => { if (update.docChanged) onChange(update.state.doc.toString()); })] }) });
 }

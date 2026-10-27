@@ -64,6 +64,7 @@ export class Store implements IssueStore {
         safePath(path);
         const raw = await this.adapter.read(path); const parsed = parse(raw); const d = parsed.data;
         if (!TYPES.includes(text(d.type))) continue;
+        if (d.type === 'local-issues/comment' && d.deletedAt) continue;
         if (!text(d.id) || !text(d.createdAt) || !text(d.updatedAt)) throw new Error('缺少 ID 或时间属性');
         const base = { id: text(d.id), createdAt: text(d.createdAt), updatedAt: text(d.updatedAt), path, revision: revision(raw) };
         if (d.type === 'local-issues/project') {
@@ -208,6 +209,14 @@ export class Store implements IssueStore {
       const previousRaw = await this.adapter.read(value.path); this.conflict({ updatedAt: '', revision: revision(previousRaw) }, old.revision);
       const raw = markdown({ updatedAt: value.updatedAt }, body, parse(previousRaw));
       await this.adapter.write(value.path, raw, previousRaw); return { ...value, revision: revision(raw) };
+    });
+  }
+  async deleteComment(id: string, expectedUpdatedAt?: string): Promise<void> {
+    await this.mutate(async () => {
+      const old = unique((await this.snapshot()).timeline.filter(c => c.id === id && c.kind === 'comment'), '评论'); this.conflict(old, expectedUpdatedAt);
+      const previousRaw = await this.adapter.read(old.path); this.conflict({ updatedAt: '', revision: revision(previousRaw) }, old.revision);
+      const raw = markdown({ deletedAt: this.now() }, old.body, parse(previousRaw));
+      await this.adapter.write(old.path, raw, previousRaw);
     });
   }
   async attach(ref: string, name: string, data: Uint8Array): Promise<{ path: string; markdown: string }> {
