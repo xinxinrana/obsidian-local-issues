@@ -8,7 +8,7 @@ const require = createRequire(import.meta.url);
 const mock = require('./obsidian-mock.cjs');
 
 test('bundled plugin registers native entry points; Vault adapter, protocol, API share and settings work together', async () => {
-  const dom = new JSDOM('<!doctype html><body></body>', { url: 'http://localhost' });
+  const dom = new JSDOM('<!doctype html><body></body>', { url: 'http://localhost', pretendToBeVisual: true });
   for (const name of ['document', 'window', 'HTMLElement', 'HTMLTextAreaElement', 'HTMLInputElement', 'HTMLLabelElement', 'HTMLSelectElement', 'Element', 'Node', 'Event', 'MouseEvent']) (globalThis as any)[name] = (dom.window as any)[name];
   mock.installDom(dom.window);
   const clipboard: string[] = [];
@@ -48,7 +48,7 @@ test('bundled plugin registers native entry points; Vault adapter, protocol, API
   const module = { exports: {} as any };
   vm.runInNewContext(built.outputFiles[0].text, { module, exports: module.exports,
     require: (id: string) => id === 'obsidian' ? mock : require(id),
-    console, document: dom.window.document, window: dom.window, navigator, HTMLElement: dom.window.HTMLElement,
+    console, document: dom.window.document, window: dom.window, navigator, HTMLElement: dom.window.HTMLElement, HTMLImageElement: dom.window.HTMLImageElement, MutationObserver: dom.window.MutationObserver, Window: dom.window.Window, getComputedStyle: dom.window.getComputedStyle,
     HTMLInputElement: dom.window.HTMLInputElement, HTMLTextAreaElement: dom.window.HTMLTextAreaElement, HTMLLabelElement: dom.window.HTMLLabelElement, HTMLSelectElement: dom.window.HTMLSelectElement,
     Event: dom.window.Event, MouseEvent: dom.window.MouseEvent, Node: dom.window.Node, Element: dom.window.Element,
     setTimeout, clearTimeout, setInterval, clearInterval, queueMicrotask, URL, URLSearchParams, Buffer, Uint8Array, ArrayBuffer,
