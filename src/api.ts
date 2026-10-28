@@ -284,7 +284,10 @@ export async function startApi(options: ApiOptions): Promise<{ close: () => Prom
         const project = url.searchParams.get('project') ?? undefined;
         if (parts.length === 2 && method === 'GET') {
           const projectId = project ? (await findProject(project)).id : undefined;
-          data = filteredIssues(await store.snapshot(), url.searchParams, projectId);
+          const snapshot = await store.snapshot();
+          const titles = new Map(snapshot.projects.map(p => [p.id, p.title]));
+          // Issue numbers are unique per project, so cross-project lists carry the project name.
+          data = filteredIssues(snapshot, url.searchParams, projectId).map(issue => ({ ...issue, project: titles.get(issue.projectId) ?? '' }));
         } else if (parts.length === 2 && method === 'POST') {
           const body = await readBody(req);
           data = await store.createIssue(str(body.project ?? project, 'project'), { ...pick<IssuePatch>(body, ISSUE_FIELDS), title: str(body.title, 'title') }); status = 201;

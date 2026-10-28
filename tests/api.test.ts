@@ -157,6 +157,10 @@ test('agent docs bootstrap a skill without hard-coded agent directories', async 
     const folder = p.path.split('/').slice(-2, -1)[0]!;
     assert.equal((await f.request(`/api/projects/${encodeURIComponent(folder)}`)).data.project.id, p.id);
     const slugOfUrl = decodeURIComponent(new URL((await f.request(`/api/links?ref=${p.id}`)).data.url).pathname.split('/').filter(Boolean)[0]!);
+    await f.store.createIssue(p.id, { title: '跨项目同号' });
+    const crossProject = await f.request('/api/issues?state=all');
+    assert.equal(crossProject.status, 200);
+    assert.equal(crossProject.data[0].project, 'Slug 项目', 'issues carry their project name for cross-project lists');
     assert.equal((await f.request(`/api/issues?project=${encodeURIComponent(slugOfUrl)}`)).status, 200);
     assert.equal((await f.request(`/api/issues?project=${encodeURIComponent(folder)}`)).status, 200);
   } finally { await f.close(); }

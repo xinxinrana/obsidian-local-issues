@@ -88,6 +88,9 @@ var HELP = `Local Issues \xB7 Obsidian \u672C\u5730\u9879\u76EE\u4E0E Issues
       --vault <\u7B14\u8BB0\u5E93\u8DEF\u5F84> \u4F7F\u7528\u8BE5\u7B14\u8BB0\u5E93\u7684\u672C\u5730 API \u8BBE\u7F6E
       --if-match <\u65F6\u95F4>    \u4EC5\u5F53 updatedAt \u5339\u914D\u65F6\u4FEE\u6539\uFF0C\u9632\u6B62\u8986\u76D6
       --dir <\u76EE\u5F55>         skill \u7684\u843D\u76D8\u76EE\u5F55\uFF08\u5199\u6210 <\u76EE\u5F55>/local-issues/SKILL.md\uFF09
+      --version            \u663E\u793A\u5F53\u524D\u63D2\u4EF6\u4E0E API \u7248\u672C
+
+\u7F16\u53F7\u53EA\u5728\u9879\u76EE\u5185\u552F\u4E00\uFF1A\u8DE8\u9879\u76EE\u8BFB\u53D6\u6216\u4FEE\u6539\u65F6\u5E26\u4E0A -P <\u9879\u76EE>\uFF0C\u6216\u76F4\u63A5\u4F20\u94FE\u63A5\u3002
 
 \u793A\u4F8B:
   local-issues project create -t "\u6211\u7684\u9879\u76EE"
@@ -99,10 +102,48 @@ var HELP = `Local Issues \xB7 Obsidian \u672C\u5730\u9879\u76EE\u4E0E Issues
 
 \u9700\u8981\u5728 Obsidian \u4E2D\u542F\u7528 Local Issues \u548C\u672C\u5730 API\u3002API \u53EA\u76D1\u542C\u672C\u673A\u3002
 \u8BED\u4E49\u5316\u94FE\u63A5\u4EC5\u5B9A\u4F4D\u8D44\u6E90\uFF0C\u65E0\u9700\u767B\u5F55\u6216\u5BC6\u94A5\uFF1B\u65E7\u5206\u4EAB\u94FE\u63A5\u7EE7\u7EED\u517C\u5BB9\u3002`;
+var COMMAND_HELP = {
+  view: `\u7528\u6CD5: local-issues view <\u94FE\u63A5>
+
+\u81EA\u52A8\u8BC6\u522B\u4ED3\u5E93\u3001\u9879\u76EE\u3001\u5217\u8868\u6216\u8BAE\u9898\uFF1B\u94FE\u63A5\u91CC\u7684\u7B5B\u9009\u53C2\u6570\uFF08state\u3001label\u3001search\uFF09\u4F1A\u4FDD\u7559\u3002`,
+  repo: `\u7528\u6CD5: local-issues repo view [\u4ED3\u5E93URL] | repo link
+
+\u4E0D\u4F20\u94FE\u63A5\u65F6\u663E\u793A\u5F53\u524D\u4ED3\u5E93\u3002`,
+  issue: `\u7528\u6CD5: local-issues issue <\u52A8\u4F5C> [\u53C2\u6570]
+
+  list [-P \u9879\u76EE] [--state open|closed|all] [-S \u5173\u952E\u8BCD] [-l \u6807\u7B7E] [-L \u6570\u91CF]
+  view <\u7F16\u53F7|\u94FE\u63A5> [-c]
+  create -P \u9879\u76EE -t \u6807\u9898 [-b \u6B63\u6587] [-l \u6807\u7B7E] [--milestone \u540D\u79F0] [--parent \u8BAE\u9898] [--depends-on \u8BAE\u9898]
+  edit <\u7F16\u53F7|\u94FE\u63A5> [-b \u6B63\u6587 | -F \u6587\u4EF6] [--add-label x] [--remove-label x] [--if-match \u65F6\u95F4]
+  comment <\u7F16\u53F7|\u94FE\u63A5> -b \u8BC4\u8BBA | -F \u6587\u4EF6 [--author \u540D\u5B57]
+  close <\u7F16\u53F7|\u94FE\u63A5> [--reason completed|on-hold|not-planned]
+  reopen <\u7F16\u53F7|\u94FE\u63A5>
+  attach <\u7F16\u53F7|\u94FE\u63A5> <\u6587\u4EF6>
+  share <\u7F16\u53F7|\u94FE\u63A5>
+
+\u7F16\u53F7\u53EA\u5728\u9879\u76EE\u5185\u552F\u4E00\uFF1A\u8DE8\u9879\u76EE\u64CD\u4F5C\u8BF7\u5E26 -P\uFF0C\u6216\u76F4\u63A5\u4F20\u94FE\u63A5\u3002`,
+  project: `\u7528\u6CD5: local-issues project <\u52A8\u4F5C>
+
+  list [--state active|paused|completed|archived] [-S \u5173\u952E\u8BCD]
+  view <\u9879\u76EE>
+  create -t \u6807\u9898 [-b \u63CF\u8FF0]
+  edit <\u9879\u76EE> [-t \u6807\u9898] [-b \u63CF\u8FF0] [--state \u72B6\u6001]
+  share <\u9879\u76EE>`,
+  comment: `\u7528\u6CD5: local-issues comment edit <\u8BC4\u8BBAID> -b \u5185\u5BB9 | comment delete <\u8BC4\u8BBAID>
+
+\u8BC4\u8BBA ID \u6765\u81EA local-issues issue view <\u7F16\u53F7> -c \u7684\u65F6\u95F4\u7EBF\u3002`,
+  skill: `\u7528\u6CD5: local-issues skill [--dir <\u76EE\u5F55>]
+
+\u4E0D\u5E26 --dir \u65F6\u8F93\u51FA SKILL.md\uFF1B\u5E26 --dir \u65F6\u5199\u5165 <\u76EE\u5F55>/local-issues/SKILL.md\u3002`,
+  api: `\u7528\u6CD5: local-issues api <\u63A5\u53E3\u8DEF\u5F84> [-X \u65B9\u6CD5] [-f key=value]
+
+\u547D\u4EE4\u6CA1\u8986\u76D6\u7684\u63A5\u53E3\u76F4\u63A5\u8C03\u7528\uFF0C\u4F8B\u5982 api /api/health\u3001api /api/issues/5 -X PATCH -f status=closed\u3002`,
+  share: `\u7528\u6CD5: local-issues share view <\u5206\u4EABURL> | edit | comment | comment-edit <\u8BC4\u8BBAID>`
+};
 var aliases = { c: "comments", P: "project", t: "title", b: "body", F: "body-file", l: "label", a: "assignee", s: "state", S: "search", L: "limit", h: "help", X: "method", f: "field", H: "header" };
-var booleans = /* @__PURE__ */ new Set(["help", "web", "comment", "comments"]);
+var booleans = /* @__PURE__ */ new Set(["help", "web", "comment", "comments", "version"]);
 var multiples = /* @__PURE__ */ new Set(["label", "assignee", "depends-on", "add-label", "remove-label", "field", "header"]);
-var allowed = /* @__PURE__ */ new Set(["project", "title", "body", "body-file", "state", "status", "label", "assignee", "milestone", "parent", "depends-on", "due-date", "author", "search", "limit", "json", "web", "vault", "url", "if-match", "help", "method", "field", "header", "comment", "add-label", "remove-label", "description", "comments", "reason", "dir"]);
+var allowed = /* @__PURE__ */ new Set(["project", "title", "body", "body-file", "state", "status", "label", "assignee", "milestone", "parent", "depends-on", "due-date", "author", "search", "limit", "json", "web", "vault", "url", "if-match", "help", "method", "field", "header", "comment", "add-label", "remove-label", "description", "comments", "reason", "dir", "version"]);
 function parse(argv) {
   const args = [], flags = {};
   for (let i = 0; i < argv.length; i++) {
@@ -220,7 +261,10 @@ function print(data, flags, kind) {
       console.log("\u6CA1\u6709\u5339\u914D\u7684\u6761\u76EE\u3002");
       return;
     }
-    for (const item of data) console.log(kind === "project" || item && typeof item === "object" && !("number" in item) && "title" in item ? `${item.title}	${item.status}	${item.closedCount ?? 0}/${item.issueCount ?? 0}	${item.id}` : `#${item.number}	${item.status}	${item.title}	${(item.labels ?? []).join(", ")}`);
+    for (const item of data) {
+      if (kind === "project" || item && typeof item === "object" && !("number" in item) && "title" in item) console.log(`${item.title}	${item.status}	${item.closedCount ?? 0}/${item.issueCount ?? 0}	${item.id}`);
+      else console.log(`#${item.number}	${item.status}	${item.project ? `${item.project}	` : ""}${item.title}	${(item.labels ?? []).join(", ")}`);
+    }
     return;
   }
   if (data?.url) {
@@ -273,8 +317,14 @@ function issuePatch(f) {
 }
 async function main() {
   const { args, flags } = parse(process.argv.slice(2));
+  if (flags.version) {
+    const health = await client(flags).request("/api/health");
+    console.log(`${health.name} ${health.version}`);
+    return;
+  }
   if (flags.help || !args.length || args[0] === "help") {
-    console.log(HELP);
+    const topic = args[0] === "help" ? args[1] : args[0];
+    console.log(topic && COMMAND_HELP[topic] || HELP);
     return;
   }
   let [command, action, ref, extra] = args;
@@ -312,6 +362,7 @@ async function main() {
     return `/api/issues/${encodeURIComponent(value)}/${suffix}${project ? `?project=${encodeURIComponent(project)}` : ""}`;
   };
   let data;
+  let note = "";
   if (shared) {
     const url = new URL(shared);
     if (flags.web) throw new Error("\u5206\u4EAB\u5F15\u7528\u901A\u8FC7 CLI \u8BBF\u95EE\uFF1B--web \u4EC5\u7528\u4E8E\u672C\u5730\u7F16\u53F7\u6216 ID\u3002");
@@ -382,6 +433,20 @@ async function main() {
       for (const label of list(flags, "label") ?? []) query.append("label", label);
       for (const name of list(flags, "assignee") ?? []) query.append("assignee", name);
       data = await api.request(resourceUrl && resource ? `${resourceUrl.origin}${resourceUrl.pathname}?${query}` : `/api/issues?${query}`);
+      if (project || resourceUrl) data.forEach((issue) => {
+        delete issue.project;
+      });
+      if (Array.isArray(data)) {
+        const state = query.get("state") ?? "open";
+        const limit = Number(query.get("limit") ?? 30);
+        if (!data.length && state === "open" && flags.json === void 0) {
+          console.log("\u6CA1\u6709\u5339\u914D\u7684\u6761\u76EE\uFF1A\u5F53\u524D\u53EA\u770B open\uFF0C\u52A0 --state all \u67E5\u770B\u5168\u90E8\u3002");
+          return;
+        }
+        if (data.length >= limit) note = `\uFF08\u5DF2\u8FBE --limit ${limit}\uFF0C\u53EF\u80FD\u8FD8\u6709\u66F4\u591A\uFF1A\u7528 --limit ${limit * 4} \u6216 --state all \u67E5\u770B\uFF09`;
+        if (!project && !resourceUrl) note = `\u5F53\u524D\u8DE8\u9879\u76EE\u5217\u51FA\uFF0C\u7B2C\u4E8C\u5217\u4E4B\u540E\u7684\u300C\u9879\u76EE\u300D\u5217\u7528\u4E8E\u533A\u5206\u540C\u53F7\u8BAE\u9898\uFF1B\u64CD\u4F5C\u65F6\u8BF7\u5E26 -P \u6216\u76F4\u63A5\u4F20\u94FE\u63A5\u3002${note ? `
+${note}` : ""}`;
+      }
     } else if (action === "view") data = await api.request(issuePath(required(ref, "Issue \u5F15\u7528")));
     else if (action === "create") data = await api.request("/api/issues", "POST", { ...issuePatch(flags), title: required(val(flags, "title"), "\u6807\u9898\uFF08--title\uFF09"), project: required(project, "\u9879\u76EE\uFF08--project\uFF09"), author: val(flags, "author") ?? "Agent" });
     else if (action === "edit") {
@@ -432,6 +497,7 @@ async function main() {
   if (flags.json !== void 0 && data?.issue) data = { ...data.issue, project: data.project, comments: data.comments, timeline: data.timeline, subIssues: data.subIssues, dependencies: data.dependencies };
   else if (flags.json !== void 0 && data?.project) data = { ...data.project, issues: data.issues };
   print(data, flags, command);
+  if (note && flags.json === void 0) console.log(note);
 }
 void main().catch((error) => {
   console.error(`local-issues: ${error instanceof Error ? error.message : "\u64CD\u4F5C\u5931\u8D25"}`);

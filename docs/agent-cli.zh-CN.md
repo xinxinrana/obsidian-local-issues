@@ -52,6 +52,14 @@ local-issues issue reopen '<议题链接>'
 
 服务仅监听本机，拒绝浏览器跨域请求。链接本身不授予额外权限；本机 CLI 可操作当前库。旧分享链接继续兼容，但不再需要其中的 key。Obsidian 双链用于笔记关联，资源链接用于跨工具定位。
 
+## 输出与提示
+
+- `issue list` 默认只看 open；项目里议题全部关闭时会明确提示「加 `--state all` 查看全部」，而不是只回「没有匹配的条目」。
+- 跨项目列出时，每行多一列项目名（`--json` 中为 `project` 字段），因为编号只在项目内唯一；带 `-P` 或直接传链接时这一列省略。
+- 结果数量达到 `--limit`（默认 30）时会提示可能还有更多。
+- `--version` 显示插件与 API 版本；`local-issues issue --help` 只显示该组命令的用法，`--help` 显示全部。
+- 创建与评论默认作者是 `Agent`，多个 agent 同时操作时用 `--author <名字>` 区分来源。
+
 ## 参考
 
 沿用 GitHub CLI 的对象、动作、编号或 URL 和选项结构：[gh issue view](https://cli.github.com/manual/gh_issue_view)、[gh issue edit](https://cli.github.com/manual/gh_issue_edit)、[gh issue comment](https://cli.github.com/manual/gh_issue_comment)。

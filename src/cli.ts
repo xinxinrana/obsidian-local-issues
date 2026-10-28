@@ -44,6 +44,9 @@ const HELP = `Local Issues · Obsidian 本地项目与 Issues
       --vault <笔记库路径> 使用该笔记库的本地 API 设置
       --if-match <时间>    仅当 updatedAt 匹配时修改，防止覆盖
       --dir <目录>         skill 的落盘目录（写成 <目录>/local-issues/SKILL.md）
+      --version            显示当前插件与 API 版本
+
+编号只在项目内唯一：跨项目读取或修改时带上 -P <项目>，或直接传链接。
 
 示例:
   local-issues project create -t "我的项目"
@@ -56,10 +59,48 @@ const HELP = `Local Issues · Obsidian 本地项目与 Issues
 需要在 Obsidian 中启用 Local Issues 和本地 API。API 只监听本机。
 语义化链接仅定位资源，无需登录或密钥；旧分享链接继续兼容。`;
 
+const COMMAND_HELP: Record<string, string> = {
+  view: `用法: local-issues view <链接>
+
+自动识别仓库、项目、列表或议题；链接里的筛选参数（state、label、search）会保留。`,
+  repo: `用法: local-issues repo view [仓库URL] | repo link
+
+不传链接时显示当前仓库。`,
+  issue: `用法: local-issues issue <动作> [参数]
+
+  list [-P 项目] [--state open|closed|all] [-S 关键词] [-l 标签] [-L 数量]
+  view <编号|链接> [-c]
+  create -P 项目 -t 标题 [-b 正文] [-l 标签] [--milestone 名称] [--parent 议题] [--depends-on 议题]
+  edit <编号|链接> [-b 正文 | -F 文件] [--add-label x] [--remove-label x] [--if-match 时间]
+  comment <编号|链接> -b 评论 | -F 文件 [--author 名字]
+  close <编号|链接> [--reason completed|on-hold|not-planned]
+  reopen <编号|链接>
+  attach <编号|链接> <文件>
+  share <编号|链接>
+
+编号只在项目内唯一：跨项目操作请带 -P，或直接传链接。`,
+  project: `用法: local-issues project <动作>
+
+  list [--state active|paused|completed|archived] [-S 关键词]
+  view <项目>
+  create -t 标题 [-b 描述]
+  edit <项目> [-t 标题] [-b 描述] [--state 状态]
+  share <项目>`,
+  comment: `用法: local-issues comment edit <评论ID> -b 内容 | comment delete <评论ID>
+
+评论 ID 来自 local-issues issue view <编号> -c 的时间线。`,
+  skill: `用法: local-issues skill [--dir <目录>]
+
+不带 --dir 时输出 SKILL.md；带 --dir 时写入 <目录>/local-issues/SKILL.md。`,
+  api: `用法: local-issues api <接口路径> [-X 方法] [-f key=value]
+
+命令没覆盖的接口直接调用，例如 api /api/health、api /api/issues/5 -X PATCH -f status=closed。`,
+  share: `用法: local-issues share view <分享URL> | edit | comment | comment-edit <评论ID>`,
+};
 const aliases: Record<string, string> = { c: 'comments', P: 'project', t: 'title', b: 'body', F: 'body-file', l: 'label', a: 'assignee', s: 'state', S: 'search', L: 'limit', h: 'help', X: 'method', f: 'field', H: 'header' };
-const booleans = new Set(['help', 'web', 'comment', 'comments']);
+const booleans = new Set(['help', 'web', 'comment', 'comments', 'version']);
 const multiples = new Set(['label', 'assignee', 'depends-on', 'add-label', 'remove-label', 'field', 'header']);
-const allowed = new Set(['project','title','body','body-file','state','status','label','assignee','milestone','parent','depends-on','due-date','author','search','limit','json','web','vault','url','if-match','help','method','field','header','comment','add-label','remove-label','description','comments','reason','dir']);
+const allowed = new Set(['project','title','body','body-file','state','status','label','assignee','milestone','parent','depends-on','due-date','author','search','limit','json','web','vault','url','if-match','help','method','field','header','comment','add-label','remove-label','description','comments','reason','dir','version']);
 function parse(argv: string[]): { args: string[]; flags: Flags } {
   const args: string[] = [], flags: Flags = {};
   for (let i = 0; i < argv.length; i++) {
@@ -145,7 +186,10 @@ function print(data: any, flags: Flags, kind?: string): void {
   if (typeof data === 'string') { console.log(data); return; }
   if (Array.isArray(data)) {
     if (!data.length) { console.log('没有匹配的条目。'); return; }
-    for (const item of data) console.log(kind === 'project' || (item && typeof item === 'object' && !('number' in item) && 'title' in item) ? `${item.title}\t${item.status}\t${item.closedCount ?? 0}/${item.issueCount ?? 0}\t${item.id}` : `#${item.number}\t${item.status}\t${item.title}\t${(item.labels ?? []).join(', ')}`);
+    for (const item of data) {
+      if (kind === 'project' || (item && typeof item === 'object' && !('number' in item) && 'title' in item)) console.log(`${item.title}\t${item.status}\t${item.closedCount ?? 0}/${item.issueCount ?? 0}\t${item.id}`);
+      else console.log(`#${item.number}\t${item.status}\t${item.project ? `${item.project}\t` : ''}${item.title}\t${(item.labels ?? []).join(', ')}`);
+    }
     return;
   }
   if (data?.url) { console.log(data.url); return; }
@@ -171,7 +215,14 @@ function issuePatch(f: Flags): Record<string, unknown> {
 }
 async function main(): Promise<void> {
   const { args, flags } = parse(process.argv.slice(2));
-  if (flags.help || !args.length || args[0] === 'help') { console.log(HELP); return; }
+  if (flags.version) {
+    const health = await client(flags).request('/api/health');
+    console.log(`${health.name} ${health.version}`); return;
+  }
+  if (flags.help || !args.length || args[0] === 'help') {
+    const topic = args[0] === 'help' ? args[1] : args[0];
+    console.log((topic && COMMAND_HELP[topic]) || HELP); return;
+  }
   let [command, action, ref, extra] = args;
   if (command === 'view' || (command === 'resolve' && action?.startsWith('http://'))) { ref = action; action = 'view'; }
   const resourceUrl = ref?.startsWith('http://') ? localUrl(ref) : undefined;
@@ -196,6 +247,7 @@ async function main(): Promise<void> {
     return `/api/issues/${encodeURIComponent(value)}/${suffix}${project ? `?project=${encodeURIComponent(project)}` : ''}`;
   };
   let data: any;
+  let note = '';
   if (shared) {
     const url = new URL(shared);
     if (flags.web) throw new Error('分享引用通过 CLI 访问；--web 仅用于本地编号或 ID。');
@@ -253,6 +305,15 @@ async function main(): Promise<void> {
       for (const label of list(flags, 'label') ?? []) query.append('label', label);
       for (const name of list(flags, 'assignee') ?? []) query.append('assignee', name);
       data = await api.request(resourceUrl && resource ? `${resourceUrl.origin}${resourceUrl.pathname}?${query}` : `/api/issues?${query}`);
+      // A scoped list already names the project, so the extra column is only useful across projects.
+      if (project || resourceUrl) data.forEach((issue: { project?: string }) => { delete issue.project; });
+      if (Array.isArray(data)) {
+        const state = query.get('state') ?? 'open';
+        const limit = Number(query.get('limit') ?? 30);
+        if (!data.length && state === 'open' && flags.json === undefined) { console.log('没有匹配的条目：当前只看 open，加 --state all 查看全部。'); return; }
+        if (data.length >= limit) note = `（已达 --limit ${limit}，可能还有更多：用 --limit ${limit * 4} 或 --state all 查看）`;
+        if (!project && !resourceUrl) note = `当前跨项目列出，第二列之后的「项目」列用于区分同号议题；操作时请带 -P 或直接传链接。${note ? `\n${note}` : ''}`;
+      }
     } else if (action === 'view') data = await api.request(issuePath(required(ref, 'Issue 引用')));
     else if (action === 'create') data = await api.request('/api/issues', 'POST', { ...issuePatch(flags), title: required(val(flags, 'title'), '标题（--title）'), project: required(project, '项目（--project）'), author: val(flags, 'author') ?? 'Agent' });
     else if (action === 'edit') {
@@ -289,6 +350,7 @@ async function main(): Promise<void> {
   if (flags.json !== undefined && data?.issue) data = { ...data.issue, project: data.project, comments: data.comments, timeline: data.timeline, subIssues: data.subIssues, dependencies: data.dependencies };
   else if (flags.json !== undefined && data?.project) data = { ...data.project, issues: data.issues };
   print(data, flags, command);
+  if (note && flags.json === undefined) console.log(note);
 }
 
 void main().catch(error => { console.error(`local-issues: ${error instanceof Error ? error.message : '操作失败'}`); process.exitCode = 1; });
