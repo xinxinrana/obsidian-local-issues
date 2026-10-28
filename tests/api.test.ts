@@ -157,6 +157,7 @@ test('agent docs bootstrap a skill without hard-coded agent directories', async 
     assert.match(skill, /^---\nname: local-issues\n/);
     assert.ok(skill.includes(`local-issues view 'http://localhost:${new URL(f.url).port}/项目/issues/5'`), 'skill uses the running origin');
     assert.match(skill, /## 查[\s\S]*## 改[\s\S]*## 兜底/);
+    assert.match(skill, /标签写重要性和类别[\s\S]*里程碑/, 'skill states the label/milestone convention');
     const guide = await (await fetch(`${f.url}/llms.txt`)).text();
     assert.match(guide, /## 给 Agent：保存这份 skill/);
     assert.match(guide, /local-issues skill/);
