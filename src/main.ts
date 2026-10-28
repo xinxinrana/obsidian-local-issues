@@ -173,7 +173,13 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
       try {
         this.server = await startApi({ store: this.store, port: this.settings.port,
           vaultName: this.app.vault.getName(), routes: this.routes, shares: this.settings.shares,
-          saveShares: () => this.saveData(this.settings), open: ref => this.openReference(ref) });
+          saveShares: () => this.saveData(this.settings), open: ref => this.openReference(ref),
+          readAttachment: async path => {
+            const file = this.app.vault.getAbstractFileByPath(path);
+            if (!(file instanceof TFile)) throw new Error('附件不存在。');
+            if (file.stat.size > 16 * 1024 * 1024) throw new Error('附件超过 16 MB，请在 Obsidian 中打开。');
+            return new Uint8Array(await this.app.vault.readBinary(file));
+          } });
       } catch (error) { this.apiError = error instanceof Error ? error.message : String(error); this.report(error); }
     });
     await this.apiQueue;

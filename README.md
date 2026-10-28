@@ -12,6 +12,7 @@ GitHub Issues-style project tracking inside an Obsidian vault. Organize projects
 - Markdown descriptions and editable comments, with chronological status history.
 - Native Obsidian links, hyperlinks, attachments, pasted images and dropped files.
 - An optional loopback API and a separate agent CLI with familiar `gh`-style commands and JSON output.
+- Semantic links open readable HTML pages in a browser: projects, issues, comments, timelines, images and related issues. Lists default to open issues and support search, filters, closed issues, board and table views. Editing opens the plugin in Obsidian. Pages run no scripts or polling; the same links retain JSON responses for the CLI. Note embeds, heading/block references and advanced Obsidian rendering open in Obsidian.
 - Revision checks and atomic writes protect edits made directly in your notes.
 
 ![Issue board with sample data](docs/images/board.png)

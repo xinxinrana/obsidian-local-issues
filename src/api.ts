@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { ResourceRoutes, parseResource, slug } from './routes';
+import { attachmentPath, attachmentReferences, escapeHtml, htmlDocument, renderPage } from './web';
 import type { Issue, IssuePatch, IssueStore, ProjectPatch, Resolved, Snapshot } from './types';
 
 export interface Share { ref: string }
@@ -9,6 +10,7 @@ export interface ApiOptions {
   shares: Record<string, Share>; saveShares: () => Promise<void>;
   routes?: ResourceRoutes;
   open?: (ref: string) => Promise<void>;
+  readAttachment?: (path: string) => Promise<Uint8Array>;
 }
 const MAX_BODY = 24 * 1024 * 1024;
 class HttpError extends Error { constructor(public status: number, message: string, public code = 'INVALID_REQUEST') { super(message); } }
@@ -43,8 +45,20 @@ async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> 
   catch (error) { if (error instanceof HttpError) throw error; throw new HttpError(400, 'JSON 格式不正确。'); }
 }
 function send(res: ServerResponse, status: number, value: unknown): void {
-  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', Vary: 'Accept' });
   res.end(JSON.stringify(value));
+}
+function sendHtml(res: ServerResponse, status: number, html: string): void {
+  res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', Vary: 'Accept',
+    'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY',
+    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'" });
+  res.end(html);
+}
+function acceptsHtml(accept = ''): boolean {
+  const types = accept.split(',').map(part => { const [type, ...params] = part.trim().toLowerCase().split(';');
+    const quality = params.find(p => p.trim().startsWith('q=')); return { type, q: quality ? Number(quality.trim().slice(2)) : 1 }; });
+  const html = types.find(t => t.type === 'text/html')?.q ?? 0;
+  return html > 0 && html > (types.find(t => t.type === 'application/json')?.q ?? 0);
 }
 function expected(req: IncomingMessage, body: Record<string, unknown>): string | undefined {
   const value = req.headers['if-match'] ?? body.expectedUpdatedAt;
@@ -106,18 +120,51 @@ export async function startApi(options: ApiOptions): Promise<{ close: () => Prom
     return resolved;
   }
   const server = createServer((req, res) => {
+    let browserHtml = false;
     void (async () => {
       const host = req.headers.host ?? '';
       if (!/^(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/i.test(host)) throw new HttpError(403, '只接受本机地址。', 'FORBIDDEN');
-      if (req.headers.origin || (req.headers['sec-fetch-site'] && req.headers['sec-fetch-site'] !== 'none')) throw new HttpError(403, '此接口仅供本机 CLI 和 Agent 使用。', 'FORBIDDEN');
       const url = new URL(req.url ?? '/', `http://127.0.0.1:${actualPort}`);
       let parts = url.pathname.split('/').filter(Boolean).map(x => { try { return decodeURIComponent(x); } catch { throw new HttpError(400, '地址编码不正确。'); } });
       const method = req.method ?? 'GET';
-      if (method === 'GET' && url.pathname === '/api/health') { send(res, 200, { ok: true, data: { name: 'Local Issues', version: '0.1.6' } }); return; }
       const shared = parts[0] === 'api' && parts[1] === 'shares' && !!parts[2];
       const resource = parseResource(url);
+      browserHtml = method === 'GET' && acceptsHtml(req.headers.accept) && ((!!resource && !resource.suffix.length) || (shared && parts.length <= 4 && (!parts[3] || parts[3] === 'resolve')));
+      const browserRead = browserHtml || (method === 'GET' && url.pathname === '/api/attachments');
+      if ((req.headers.origin && (!browserRead || req.headers.origin !== `http://${host}`)) ||
+        (req.headers['sec-fetch-site'] && req.headers['sec-fetch-site'] !== 'none' && !(browserRead && req.headers['sec-fetch-site'] === 'same-origin'))) {
+        throw new HttpError(403, '只允许本机 CLI 或同源页面读取。', 'FORBIDDEN');
+      }
+      if (method === 'GET' && url.pathname === '/api/health') { send(res, 200, { ok: true, data: { name: 'Local Issues', version: '0.1.6' } }); return; }
+      if (method === 'GET' && url.pathname === '/api/attachments') {
+        const path = attachmentPath(url.searchParams.get('path') ?? '');
+        if (!path || !options.readAttachment) throw new HttpError(404, '附件不存在。', 'NOT_FOUND');
+        const issue = await store.getIssue(str(url.searchParams.get('issue'), 'issue'));
+        const snapshot = await store.snapshot();
+        const texts = [issue.body, ...snapshot.timeline.filter(t => t.issueId === issue.id && t.kind === 'comment').map(t => t.body)];
+        if (!texts.some(text => attachmentReferences(text).has(path))) throw new HttpError(404, '议题中未引用此附件。', 'NOT_FOUND');
+        const bytes = await options.readAttachment(path);
+        if (bytes.byteLength > 16 * 1024 * 1024) throw new HttpError(413, '附件超过 16 MB，请在 Obsidian 中打开。', 'TOO_LARGE');
+        const ext = path.split('.').at(-1)!.toLowerCase();
+        const images: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', avif: 'image/avif' };
+        res.writeHead(200, { 'Content-Type': images[ext] ?? 'application/octet-stream', 'Content-Length': bytes.byteLength,
+          'Content-Disposition': `${images[ext] ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(path.split('/').at(-1)!)}`,
+          'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Cross-Origin-Resource-Policy': 'same-origin',
+          'Content-Security-Policy': "default-src 'none'; sandbox" });
+        res.end(Buffer.from(bytes)); return;
+      }
       if (resource) {
         const path = await routes.translate(store, resource);
+        if (browserHtml) {
+          await routes.sync(store);
+          const snapshot = await store.snapshot();
+          const project = resource.project ? snapshot.projects.find(p => routes.projects[p.id] === resource.project) : undefined;
+          const issue = resource.kind === 'issue' ? snapshot.issues.find(i => i.projectId === project?.id && i.number === resource.number) : undefined;
+          // Keep both tab counts within the current search/attribute filters.
+          const query = new URLSearchParams(url.search); query.delete('state'); query.delete('status'); query.delete('limit');
+          sendHtml(res, 200, renderPage({ snapshot, routes, vaultName: options.vaultName, url, project, issue,
+            issues: project ? filteredIssues(snapshot, query, project.id) : undefined })); return;
+        }
         if (!path) {
           if (method !== 'GET') throw new HttpError(405, '仓库入口仅支持读取。', 'METHOD_NOT_ALLOWED');
           const projects = await routes.sync(store);
@@ -135,6 +182,17 @@ export async function startApi(options: ApiOptions): Promise<{ close: () => Prom
         if (!share) throw new HttpError(404, '旧分享链接不存在。', 'NOT_FOUND');
         const resolved = await store.resolve(share.ref);
         if (resolved.kind === 'note') throw new HttpError(403, '分享仅支持项目和 Issue。', 'FORBIDDEN');
+        if (browserHtml) {
+          await routes.sync(store);
+          const snapshot = await store.snapshot();
+          const issue = resolved.kind === 'issue' ? resolved.value : undefined;
+          const fullProject = snapshot.projects.find(p => p.id === (issue?.projectId ?? resolved.value.id));
+          const project = issue && fullProject ? { ...fullProject, description: '' } : fullProject;
+          const scoped = { ...snapshot, projects: project ? [project] : [],
+            issues: snapshot.issues.filter(i => issue ? i.id === issue.id : i.projectId === project?.id),
+            timeline: snapshot.timeline.filter(t => issue ? t.issueId === issue.id : snapshot.issues.some(i => i.projectId === project?.id && i.id === t.issueId)), warnings: [] };
+          sendHtml(res, 200, renderPage({ snapshot: scoped, routes, vaultName: options.vaultName, url, project, issue })); return;
+        }
         if (parts.length <= 4 && (!parts[3] || parts[3] === 'resolve')) {
           if (method === 'GET') data = await resolvedDetail(resolved, true);
           else if (method === 'PATCH') {
@@ -216,7 +274,8 @@ export async function startApi(options: ApiOptions): Promise<{ close: () => Prom
       const message = error instanceof Error ? error.message : '操作失败。';
       const explicit = error as { status?: number; code?: string };
       const status = explicit.status ?? (/conflict|changed|冲突|已被|已修改|更新后|过期/i.test(message) ? 409 : /not found|不存在|未找到|找不到/i.test(message) ? 404 : 400);
-      send(res, status, { ok: false, error: { code: explicit.code ?? (status === 409 ? 'CONFLICT' : status === 404 ? 'NOT_FOUND' : 'INVALID_REQUEST'), message } });
+      if (browserHtml) sendHtml(res, status, htmlDocument('无法打开', `<main><h1>无法打开此页面</h1><p>${escapeHtml(message)}</p><a href="/">返回项目</a></main>`));
+      else send(res, status, { ok: false, error: { code: explicit.code ?? (status === 409 ? 'CONFLICT' : status === 404 ? 'NOT_FOUND' : 'INVALID_REQUEST'), message } });
     });
   });
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(options.port, '127.0.0.1', () => { server.off('error', reject); resolve(); }); });
