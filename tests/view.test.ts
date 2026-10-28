@@ -57,7 +57,9 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     fill(modal.contentEl.querySelector('textarea'), '项目正文 [[Reference]]'); click('保存', modal.modalEl);
     await until(async () => (await store.snapshot()).projects.length === 1 && !mock.modals.length && !!view.contentEl.querySelector('input[aria-label="搜索 Issues"]'), '创建项目');
     const project = (await store.snapshot()).projects[0];
-    click('+ 新建 Issue'); await until(() => !!view.contentEl.querySelector('.li-create'), '原位新建'); modal = { contentEl: view.contentEl.querySelector('.li-create-content'), modalEl: view.contentEl.querySelector('.li-create') };
+    assert.deepEqual([...view.contentEl.querySelectorAll('.li-tabs .li-icon')].map(icon => icon.dataset.icon), ['circle-dot', 'columns-3', 'table']);
+    assert.deepEqual([...view.contentEl.querySelectorAll('.li-state-tabs .li-icon')].map(icon => icon.dataset.icon), ['circle-dot', 'circle-check']);
+    click('新建 Issue'); await until(() => !!view.contentEl.querySelector('.li-create'), '原位新建'); modal = { contentEl: view.contentEl.querySelector('.li-create-content'), modalEl: view.contentEl.querySelector('.li-create') };
     const properties = modal.contentEl.querySelector('details.li-properties');
     assert.ok(properties); assert.equal(properties.open, false, '新建 Issue 属性默认折叠');
     assert.match(properties.querySelector('summary').textContent, /属性与关联/);
@@ -145,6 +147,8 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     assert.match(view.contentEl.querySelector('.li-state-tabs').textContent, /0 个开启.*1 个已关闭/);
     assert.ok(!view.contentEl.querySelector('.li-issue-list'));
     click('1 个已关闭'); await until(() => !!view.contentEl.querySelector('.li-issue-list'), '切换已关闭');
+    const commentCount = view.contentEl.querySelector('.li-issue-meta [aria-label$="条评论"]');
+    assert.ok(commentCount?.querySelector('[data-icon="message-square"][aria-hidden="true"]'));
     assert.equal(view.contentEl.querySelector('.li-state-tab.is-active').getAttribute('aria-pressed'), 'true');
     click('表格'); await until(() => !!view.contentEl.querySelector('.li-issues-table'), '表格视图');
     assert.match(view.contentEl.querySelector('.li-issues-table').textContent, /修改后的标题/);
@@ -159,7 +163,7 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     await until(() => !!view.contentEl.querySelector('.li-issues-table') && view.contentEl.querySelector('.li-issues-table') !== oldSearchTable, '评论全文搜索');
     assert.match(view.contentEl.querySelector('.li-issues-table').textContent, /修改后的标题/);
     await view.navigate(project.id, issue.id);
-    click('+ 添加子议题'); await until(() => !!view.contentEl.querySelector('.li-create'), '原位新建子议题'); modal = { contentEl: view.contentEl.querySelector('.li-create-content'), modalEl: view.contentEl.querySelector('.li-create') };
+    click('添加子议题'); await until(() => !!view.contentEl.querySelector('.li-create'), '原位新建子议题'); modal = { contentEl: view.contentEl.querySelector('.li-create-content'), modalEl: view.contentEl.querySelector('.li-create') };
     assert.equal(modal.contentEl.querySelector('details.li-properties').open, false);
     assert.match(modal.contentEl.querySelector('.li-property-summary').textContent, /父议题/);
     fill(modal.contentEl.querySelector('input[placeholder="简洁描述这件事"]'), '子议题');
@@ -285,7 +289,7 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     click('编辑属性'); click('放弃修改并继续', mock.modals[0].modalEl);
     await until(() => !!view.contentEl.querySelector('.li-sidebar .li-properties'), '放弃评论后修改属性');
     fill(view.contentEl.querySelector('.li-sidebar input[placeholder="多个标签用逗号分隔"]'), '不保存标签');
-    click('+ 添加子议题'); assert.match(mock.modals[0].contentEl.textContent, /议题属性/);
+    click('添加子议题'); assert.match(mock.modals[0].contentEl.textContent, /议题属性/);
     click('放弃修改并继续', mock.modals[0].modalEl);
     await until(() => !!view.contentEl.querySelector('.li-create'), '放弃属性后新建议题');
     fill(view.contentEl.querySelector('input[placeholder="简洁描述这件事"]'), '不保存的新议题');
