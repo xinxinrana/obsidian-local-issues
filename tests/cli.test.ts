@@ -114,5 +114,8 @@ test('CLI gh-style lifecycle, JSON selection, stdin, files, attachments and shar
     assert.equal(sharedProject.code, 0, sharedProject.stderr); assert.equal(JSON.parse(sharedProject.stdout).id, project.id);
     assert.equal((await run(['project', 'edit', projectShare.url, '-b', 'Project CLI description'], undefined, false)).code, 0);
     assert.equal((await f.store.getProject(project.id)).description, 'Project CLI description');
+    const removable = await json(['issue', 'comment', created.id, '-b', '可删除评论']);
+    assert.equal((await json(['comment', 'delete', removable.id])).deleted, true);
+    assert.ok(!(await f.store.snapshot()).timeline.some(entry => entry.id === removable.id));
   } finally { await f.close(); await rm(temp, { recursive: true, force: true }); }
 });

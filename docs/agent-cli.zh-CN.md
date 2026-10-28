@@ -1,6 +1,6 @@
 # Local Issues：链接与 CLI
 
-分享内容是一条语义化链接。人通过路径看懂目标，agent 通过 CLI 读取和操作。无需登录、token 或分享密钥。
+分享内容是一条语义化链接。浏览器打开会显示本机 HTML 阅读页面，编辑时可进入 Obsidian；agent 通过 CLI 读取 JSON 和操作数据。无需登录、token 或分享密钥。浏览器通过 `Accept: text/html` 获取网页；CLI 和不声明 HTML 的请求继续获取 JSON。
 
 | 链接路径 | 指向 |
 | --- | --- |

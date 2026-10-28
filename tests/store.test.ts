@@ -14,6 +14,24 @@ class Memory implements VaultAdapter {
 }
 function setup() { const adapter = new Memory(); return { adapter, store: new Store(adapter) }; }
 
+test('comment deletion checks revisions and preserves a recoverable Markdown record', async () => {
+  const { adapter, store } = setup();
+  const project = await store.createProject({ title: '删除评论' });
+  const issue = await store.createIssue(project.id, { title: '讨论' });
+  const comment = await store.addComment(issue.id, '原评论 ![[image.png]]');
+  const changed = await store.editComment(comment.id, '更新后的评论');
+  await assert.rejects(store.deleteComment(comment.id, comment.revision), /冲突/);
+  assert.equal((await store.snapshot()).timeline.length, 1);
+  await store.deleteComment(comment.id, changed.revision);
+  assert.equal((await new Store(adapter).snapshot()).timeline.length, 0);
+  assert.match(adapter.files.get(comment.path)!, /deletedAt:/);
+  assert.match(adapter.files.get(comment.path)!, /更新后的评论/);
+  await assert.rejects(store.editComment(comment.id, '覆盖已删除评论'), /找不到评论/);
+  await store.updateIssue(issue.id, { status: 'closed' });
+  const event = (await store.snapshot()).timeline[0];
+  await assert.rejects(store.deleteComment(event.id), /找不到评论/);
+});
+
 test('project / issue / multiple comments / close and reopen roundtrip remains readable Markdown', async () => {
   const { adapter, store } = setup();
   const p = await store.createProject({ title: '本地项目', description: '项目正文 [[知识库]]', dueDate: '2026-12-31' });

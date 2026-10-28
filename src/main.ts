@@ -5,6 +5,7 @@ import { ResourceRoutes, slug } from './routes';
 import { Store } from './store';
 import { startApi } from './api';
 import { IssuesView, VIEW_TYPE, type ViewHost } from './view';
+import { suppressTooltips } from './tooltips';
 import type { VaultAdapter } from './types';
 
 interface Settings {
@@ -128,6 +129,7 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
 
   openSettings(): void {
     const modal = new Modal(this.app);
+    suppressTooltips(modal.modalEl);
     modal.setTitle('Local Issues 设置');
     const tab = new LocalIssuesSettings(this.app, this);
     tab.containerEl = modal.contentEl;
@@ -171,7 +173,13 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
       try {
         this.server = await startApi({ store: this.store, port: this.settings.port,
           vaultName: this.app.vault.getName(), routes: this.routes, shares: this.settings.shares,
-          saveShares: () => this.saveData(this.settings), open: ref => this.openReference(ref) });
+          saveShares: () => this.saveData(this.settings), open: ref => this.openReference(ref),
+          readAttachment: async path => {
+            const file = this.app.vault.getAbstractFileByPath(path);
+            if (!(file instanceof TFile)) throw new Error('附件不存在。');
+            if (file.stat.size > 16 * 1024 * 1024) throw new Error('附件超过 16 MB，请在 Obsidian 中打开。');
+            return new Uint8Array(await this.app.vault.readBinary(file));
+          } });
       } catch (error) { this.apiError = error instanceof Error ? error.message : String(error); this.report(error); }
     });
     await this.apiQueue;
@@ -206,7 +214,7 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
 class LocalIssuesSettings extends PluginSettingTab {
   constructor(app: App, private plugin: LocalIssuesPlugin) { super(app, plugin); }
   display(): void {
-    const { containerEl: el, plugin: p } = this; el.empty();
+    const { containerEl: el, plugin: p } = this; el.empty(); suppressTooltips(el);
     new Setting(el).setName('打开项目').setDesc('项目、Issues、评论和看板。').addButton(b => b.setButtonText('打开').setCta().onClick(() => p.activate()));
     new Setting(el).setName('显示名称').setDesc('新建 Issue、评论和状态记录的默认作者。').addText(t => t.setValue(p.settings.author).onChange(async value => {
       p.settings.author = value.trim() || '我'; p.store.author = p.settings.author; await p.saveSettings();

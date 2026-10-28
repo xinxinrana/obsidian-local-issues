@@ -28,6 +28,9 @@ test('API uses Markdown store for project → issue → comments, edits and stat
     assert.equal((await f.request(`/api/issues/1?project=${project.data.id}`)).data.issue.id, id);
     assert.equal((await f.request(`/api/issues/${id}`, 'PATCH', { body: '覆盖' }, { 'If-Match': 'old-revision' })).status, 409);
     assert.equal((await f.request(`/api/issues/${id}`)).data.issue.body, '# 需求');
+    assert.equal((await f.request(`/api/comments/${second.data.id}`, 'DELETE', {}, { 'If-Match': 'stale' })).status, 409);
+    assert.equal((await f.request(`/api/comments/${second.data.id}`, 'DELETE')).data.deleted, true);
+    assert.equal((await f.request(`/api/issues/${id}`)).data.comments.length, 1);
   } finally { await f.close(); }
 });
 

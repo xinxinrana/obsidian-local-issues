@@ -9,15 +9,21 @@
     "test": "node --import jiti/register --test tests/*.test.ts"
   },
   "dependencies": {
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/lang-markdown": "^6.5.2",
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.13",
+    "marked": "18.1.2",
     "yaml": "^2.8.1"
   },
   "devDependencies": {
-    "obsidian": "latest",
-    "typescript": "^5.8.3",
-    "esbuild": "0.25.5",
     "@types/node": "^22.15.17",
+    "esbuild": "0.25.5",
     "jiti": "^2.6.1",
-    "jsdom": "^26.1.0"
+    "jsdom": "^26.1.0",
+    "obsidian": "latest",
+    "typescript": "^5.8.3"
   },
   "repository": {
     "type": "git",
