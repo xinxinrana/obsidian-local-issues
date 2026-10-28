@@ -41,7 +41,7 @@ export function startWebClient(services?: { request?: typeof fetch; navigate?: (
     } catch (error) { if (controller.signal.aborted) throw new Error('请求超时，请确认 Obsidian 和插件正在运行后重试。'); throw error; }
     finally { window.clearTimeout(timeout); }
   }
-  function resize(textarea: HTMLTextAreaElement): void { textarea.style.height = 'auto'; textarea.style.height = `${textarea.scrollHeight}px`; }
+  function resize(textarea: HTMLTextAreaElement): void { textarea.style.removeProperty('height'); textarea.style.height = `${textarea.scrollHeight}px`; }
   function initialize(form: HTMLFormElement): void {
     baselines.set(form, values(form));
     form.querySelectorAll('textarea').forEach(resize);
@@ -111,7 +111,9 @@ export function startWebClient(services?: { request?: typeof fetch; navigate?: (
         if (!file.size || file.size > 16 * 1024 * 1024) throw new Error('每个附件须为 1 字节至 16 MB。');
         feedback(form, `正在上传 ${file.name}…`);
         const base64 = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1]); reader.onerror = () => reject(new Error('读取附件失败。')); reader.readAsDataURL(file);
+          const reader = new FileReader();
+          reader.onload = () => { const result = reader.result; if (typeof result === 'string') resolve(result.split(',')[1] ?? ''); else reject(new Error('读取附件失败。')); };
+          reader.onerror = () => reject(new Error('读取附件失败。')); reader.readAsDataURL(file);
         });
         const data = await api(form.dataset.upload!, 'POST', { name: file.name, base64 });
         if (!form.isConnected) return;
@@ -135,7 +137,9 @@ export function startWebClient(services?: { request?: typeof fetch; navigate?: (
         const data = await api('/api/preview', 'POST', { body, ref: form.dataset.ref || '' });
         if (!form.isConnected) return;
         if (body !== textarea.value) { feedback(form, '内容已变化，请重新预览。'); return; }
-        output.innerHTML = data.html; textarea.hidden = true; output.hidden = false;
+        const parsed = new DOMParser().parseFromString(String(data.html), 'text/html');
+        output.replaceChildren(...Array.from(parsed.body.childNodes, node => document.importNode(node, true)));
+        textarea.hidden = true; output.hidden = false;
       } catch (error) { feedback(form, error instanceof Error ? error.message : '预览失败。', true); return; }
       finally { busy.delete(button); button.disabled = false; }
     }

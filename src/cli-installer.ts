@@ -37,7 +37,7 @@ export class CliInstaller {
   private run(file: string, args: string[], extra: NodeJS.ProcessEnv = {}): Promise<string> {
     const env = { ...this.env, NODE_OPTIONS: '', ...extra };
     if (this.options.run) return this.options.run(file, args, env);
-    return new Promise((resolve, reject) => execFile(file, args, { env, timeout: 15000, maxBuffer: 2 * 1024 * 1024, windowsHide: true }, (error, stdout) => error ? reject(error) : resolve(stdout)));
+    return new Promise((resolve, reject) => execFile(file, args, { env, timeout: 15000, maxBuffer: 2 * 1024 * 1024, windowsHide: true }, (error, stdout) => error ? reject(error instanceof Error ? error : new Error('命令执行失败。')) : resolve(stdout)));
   }
   private owns(content: string): boolean {
     return content.includes(marker) && (content.includes(`local-issues-owner: ${this.owner}`) ||

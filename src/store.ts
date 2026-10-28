@@ -36,7 +36,7 @@ function markdown(values: Metadata, body: string, old?: Parsed): string {
   for (const [key, value] of Object.entries(values)) doc.set(key, value);
   return `---\n${doc.toString({ lineWidth: 0 }).trimEnd()}\n---\n\n${body.replace(/\s+$/, '')}\n`;
 }
-function slug(s: string): string { return s.normalize('NFKC').replace(/[\[\]#|\\/:*?"<>\x00-\x1f]/g, '-').replace(/\s+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'untitled'; }
+function slug(s: string): string { return s.normalize('NFKC').replace(/[[\]#|\\/:*?"<>\x00-\x1f]/g, '-').replace(/\s+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'untitled'; }
 function normalizedRef(ref: string): string {
   if (typeof ref !== 'string' || !ref.trim()) throw new Error('请提供项目、Issue 或双链');
   let s = ref.trim();
@@ -231,7 +231,7 @@ export class Store implements IssueStore {
       try { this.pickIssue(snap, ref); } catch { this.pickProject(snap, ref); }
       if (typeof name !== 'string' || !name.trim() || /[\\/\0\r\n]/.test(name) || name === '.' || name === '..') throw new Error('附件文件名无效');
       if (!(data instanceof Uint8Array) || !data.length || data.length > 50 * 1024 * 1024) throw new Error('附件必须为 1 字节至 50 MB');
-      const clean = name.replace(/[\[\]#|:*?"<>]/g, '-').slice(-150);
+      const clean = name.replace(/[[\]#|:*?"<>]/g, '-').slice(-150);
       const path = safePath(`resource/local-issues/${randomUUID().slice(0, 8)}-${clean}`);
       await this.adapter.writeBinary(path, data);
       const image = /\.(png|jpe?g|gif|webp|bmp|avif|svg)$/i.test(clean);

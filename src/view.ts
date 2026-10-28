@@ -111,9 +111,9 @@ export class IssuesView extends ItemView {
     return new Promise<void>((resolve, reject) => {
       modal.onClose = () => {
         this.discardPrompt = undefined;
-        if (!discard) { Promise.resolve().then(() => { this.locateEditing(); resolve(); }); return; }
+        if (!discard) { void Promise.resolve().then(() => { this.locateEditing(); resolve(); }); return; }
         this.stopEditing(true);
-        Promise.resolve().then(run).then(() => resolve(), reject);
+        void Promise.resolve().then(run).then(() => resolve(), reject);
       };
       const buttons = el(modal.modalEl, 'div', 'li-modal-actions');
       const keep = action(buttons, '返回编辑', () => modal.close());
