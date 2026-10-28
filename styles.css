@@ -219,3 +219,7 @@
 .local-issues .li-create-hint { margin: 0 0 20px; }
 .local-issues .li-detail-title:has(input) { display: block; flex: 1 1 400px; }
 .local-issues .li-detail-title input { width: 100%; }
+
+.local-issues .li-editing-location { max-width: min(50%, 420px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-accent); }
+.local-issues .li-editing { scroll-margin-block: 80px; }
+.local-issues .li-comment:has(.li-editing) { border-color: var(--interactive-accent); }
