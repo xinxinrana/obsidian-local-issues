@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { parseResource } from './routes';
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
-import { resolve, dirname, basename } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { resolve, dirname, basename, join } from 'node:path';
 
 type Flags = Record<string, string | boolean | string[]>;
 const HELP = `Local Issues · Obsidian 本地项目与 Issues
@@ -9,7 +9,8 @@ const HELP = `Local Issues · Obsidian 本地项目与 Issues
 用法: local-issues <命令> [参数] [选项]
 
   view <语义化URL>
-  repo view <仓库URL> | link
+  repo view [仓库URL] | link
+  skill [--dir <目录>]               输出 SKILL.md，或写到 <目录>/local-issues/SKILL.md
   project list | view <项目> | create | edit <项目> | share <项目>
   issue list | view <编号/双链/ID/分享URL> | create | edit <引用>
   issue comment <引用> | close <引用> | reopen <引用>
@@ -42,6 +43,7 @@ const HELP = `Local Issues · Obsidian 本地项目与 Issues
       --web                在 Obsidian 中打开
       --vault <笔记库路径> 使用该笔记库的本地 API 设置
       --if-match <时间>    仅当 updatedAt 匹配时修改，防止覆盖
+      --dir <目录>         skill 的落盘目录（写成 <目录>/local-issues/SKILL.md）
 
 示例:
   local-issues project create -t "我的项目"
@@ -57,7 +59,7 @@ const HELP = `Local Issues · Obsidian 本地项目与 Issues
 const aliases: Record<string, string> = { c: 'comments', P: 'project', t: 'title', b: 'body', F: 'body-file', l: 'label', a: 'assignee', s: 'state', S: 'search', L: 'limit', h: 'help', X: 'method', f: 'field', H: 'header' };
 const booleans = new Set(['help', 'web', 'comment', 'comments']);
 const multiples = new Set(['label', 'assignee', 'depends-on', 'add-label', 'remove-label', 'field', 'header']);
-const allowed = new Set(['project','title','body','body-file','state','status','label','assignee','milestone','parent','depends-on','due-date','author','search','limit','json','web','vault','url','if-match','help','method','field','header','comment','add-label','remove-label','description','comments','reason']);
+const allowed = new Set(['project','title','body','body-file','state','status','label','assignee','milestone','parent','depends-on','due-date','author','search','limit','json','web','vault','url','if-match','help','method','field','header','comment','add-label','remove-label','description','comments','reason','dir']);
 function parse(argv: string[]): { args: string[]; flags: Flags } {
   const args: string[] = [], flags: Flags = {};
   for (let i = 0; i < argv.length; i++) {
@@ -143,7 +145,7 @@ function print(data: any, flags: Flags, kind?: string): void {
   if (typeof data === 'string') { console.log(data); return; }
   if (Array.isArray(data)) {
     if (!data.length) { console.log('没有匹配的条目。'); return; }
-    for (const item of data) console.log(kind === 'project' ? `${item.title}\t${item.status}\t${item.closedCount ?? 0}/${item.issueCount ?? 0}\t${item.id}` : `#${item.number}\t${item.status}\t${item.title}\t${(item.labels ?? []).join(', ')}`);
+    for (const item of data) console.log(kind === 'project' || (item && typeof item === 'object' && !('number' in item) && 'title' in item) ? `${item.title}\t${item.status}\t${item.closedCount ?? 0}/${item.issueCount ?? 0}\t${item.id}` : `#${item.number}\t${item.status}\t${item.title}\t${(item.labels ?? []).join(', ')}`);
     return;
   }
   if (data?.url) { console.log(data.url); return; }
@@ -214,8 +216,18 @@ async function main(): Promise<void> {
     else throw new Error('分享链接支持 view、edit、comment、comment-edit、close、reopen。');
   } else if (command === 'repo') {
     if (action === 'view' && resourceUrl && resource?.kind === 'repo') data = await api.request(resourceUrl.toString());
+    else if (action === 'view' && !ref) data = await api.request('/');
     else if (action === 'link') data = await api.request('/api/links');
-    else throw new Error('用法：local-issues repo view <仓库URL> 或 local-issues repo link');
+    else throw new Error('用法：local-issues repo view [仓库URL] 或 local-issues repo link');
+  } else if (command === 'skill') {
+    const text = await api.request('/api/skill');
+    const dir = val(flags, 'dir');
+    if (!dir) data = text;
+    else {
+      const target = join(resolve(dir), 'local-issues', 'SKILL.md');
+      mkdirSync(dirname(target), { recursive: true }); writeFileSync(target, text);
+      data = `已写入 ${target}`;
+    }
   } else if (command === 'project') {
     if (action === 'list') {
       const query = new URLSearchParams(); if (val(flags, 'state')) query.set('state', val(flags, 'state')!); if (val(flags, 'search')) query.set('search', val(flags, 'search')!);

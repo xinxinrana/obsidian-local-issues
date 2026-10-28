@@ -44,6 +44,12 @@ function normalizedRef(ref: string): string {
   return s.replace(/\.md$/i, '').trim();
 }
 function matchesPath(path: string, ref: string): boolean { const p = path.replace(/\.md$/, ''); return p === ref || p.split('/').pop() === ref; }
+/** Project folder is `<title slug>-<id prefix>`; accept both the folder and the stripped slug. */
+function matchesProject(project: Project, ref: string): boolean {
+  if (project.id === ref || project.title === ref || matchesPath(project.path, ref)) return true;
+  const folder = project.path.split('/').slice(-2, -1)[0] ?? '';
+  return !!folder && (folder === ref || folder.replace(/-[0-9a-f]{8}$/i, '') === ref);
+}
 function unique<T>(items: T[], label: string): T { if (!items.length) throw new Error(`找不到${label}`); if (items.length > 1) throw new Error(`${label}不唯一，请使用完整双链或 ID`); return items[0]; }
 function revision(raw: string): string { return createHash('sha256').update(raw).digest('hex'); }
 function link(path: string): string { return `[[${path.replace(/\.md$/, '')}]]`; }
@@ -99,7 +105,7 @@ export class Store implements IssueStore {
   }
   private pickProject(snap: Snapshot, ref: string): Project {
     const r = normalizedRef(ref);
-    return unique(snap.projects.filter(p => p.id === r || p.title === r || matchesPath(p.path, r)), '项目');
+    return unique(snap.projects.filter(p => matchesProject(p, r)), '项目');
   }
   private pickIssue(snap: Snapshot, ref: string, project?: string): Issue {
     const r = normalizedRef(ref);
@@ -235,7 +241,7 @@ export class Store implements IssueStore {
   async resolve(ref: string): Promise<Resolved> {
     const r = normalizedRef(ref); const snap = await this.snapshot();
     const issues = snap.issues.filter(i => i.id === r || matchesPath(i.path, r));
-    const projects = snap.projects.filter(p => p.id === r || p.title === r || matchesPath(p.path, r));
+    const projects = snap.projects.filter(p => matchesProject(p, r));
     if (issues.length + projects.length > 1) throw new Error('链接不唯一，请使用完整路径或 ID');
     if (issues.length) return { kind: 'issue', value: issues[0] };
     if (projects.length) return { kind: 'project', value: projects[0] };

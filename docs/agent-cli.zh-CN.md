@@ -1,6 +1,6 @@
 # Local Issues：链接与 CLI
 
-分享内容是一条语义化链接。浏览器打开可直接管理项目、议题、评论、状态和附件；agent 通过 CLI 读取 JSON 和操作同一份数据。无需登录、token 或分享密钥。浏览器通过 `Accept: text/html` 获取网页；CLI 和不声明 HTML 的请求继续获取 JSON。`/llms.txt` 提供工具说明与 `/api/cli.mjs` 下载入口，CLI 需要 Node.js 22+。
+分享内容是一条语义化链接。浏览器打开可直接管理项目、议题、评论、状态和附件；agent 通过 CLI 读取 JSON 和操作同一份数据。无需登录、token 或分享密钥。浏览器通过 `Accept: text/html` 获取网页；CLI 和不声明 HTML 的请求继续获取 JSON。`/llms.txt` 是给 agent 的自举说明，`/api/cli.mjs` 是 CLI 下载入口，CLI 需要 Node.js 22+。
 
 | 链接路径 | 指向 |
 | --- | --- |
@@ -23,7 +23,13 @@
 
 ## Agent 使用
 
-在 Obsidian 中启用 Local Issues 的本地 API。CLI 需要 Node.js 22 或以上；从源码目录运行 `npm install -g .` 后，可使用 `local-issues` 命令（支持 Windows），也可用 `node '/路径/cli.mjs'` 代替 `local-issues`。
+在 Obsidian 中启用 Local Issues 的本地 API。CLI 需要 Node.js 22 或以上。
+
+插件加载时会把全局命令 `local-issues` 写到 `~/.local/bin`（Windows 为 `local-issues.cmd`），内容是 `node '<插件目录>/cli.mjs' --vault '<笔记库>' "$@"`：命令绑定当前笔记库，端口从插件设置读取，改端口不用重装。该目录不在 PATH 时插件会提示；设置页可「安装命令 / 移除命令」，移除只删本插件写入的文件。也可以从源码目录运行 `npm install -g .`，或用 `node '/路径/cli.mjs' --vault '/笔记库'` 代替 `local-issues`。
+
+Agent 侧的用法用一份极简 skill 承载：`local-issues skill` 输出 `SKILL.md`（含 frontmatter），`local-issues skill --dir <目录>` 直接写成 `<目录>/local-issues/SKILL.md`。插件不知道也不需要知道各 agent 的 skills 目录在哪儿，落盘位置由 agent 自己决定；插件设置里的「复制引导语」就是这段交接话术，「复制 Skill」只复制 SKILL.md 正文。
+
+`/llms.txt` 是给 agent 的自举入口：先说明如何保存这份 skill，再给出命令速查；网页 HTML 只在头部留一个 `<link rel="llms">` 和注释供 agent 发现，界面上不展示。项目参数 `-P` 接受项目标题、笔记文件夹名或链接里的项目名。
 
 ```sh
 local-issues view '<任意资源链接>' --json

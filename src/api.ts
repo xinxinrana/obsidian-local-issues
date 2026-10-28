@@ -3,7 +3,7 @@ import { createHmac, randomBytes } from 'node:crypto';
 import { ResourceRoutes, parseResource, slug } from './routes';
 import { attachmentPath, attachmentReferences, escapeHtml, htmlDocument, renderMarkdown, renderPage } from './web';
 import { startWebClient } from './web-client';
-import { agentSkill } from './agent-skill';
+import { agentGuide, agentSkill } from './agent-skill';
 import type { Issue, IssuePatch, IssueStore, ProjectPatch, Resolved, Snapshot } from './types';
 
 export interface Share { ref: string }
@@ -14,6 +14,10 @@ export interface ApiOptions {
   open?: (ref: string) => Promise<void>;
   readAttachment?: (path: string) => Promise<Uint8Array>;
   readCli?: () => Promise<string>;
+  /** Absolute path to cli.mjs, embedded in the agent docs as a fallback command. */
+  cliPath?: string;
+  /** Vault path, embedded in the agent docs as a fallback command. */
+  vaultPath?: string;
   author?: string;
 }
 const MAX_BODY = 24 * 1024 * 1024;
@@ -105,6 +109,17 @@ export async function startApi(options: ApiOptions): Promise<{ close: () => Prom
   const routes = options.routes ?? new ResourceRoutes(slug(options.vaultName));
   let actualPort = options.port;
   const attachmentKey = randomBytes(32);
+  const skillOptions = () => ({ origin: `http://localhost:${actualPort}`, cli: options.cliPath, vault: options.vaultPath });
+  /** Accept project id, title, note path, folder slug or the shortened URL slug. */
+  async function findProject(ref: string) {
+    try { return await store.getProject(ref); }
+    catch (error) {
+      await routes.sync(store);
+      const id = Object.entries(routes.projects).find(([, name]) => name === ref)?.[0];
+      if (!id) throw error;
+      return store.getProject(id);
+    }
+  }
   const access = (ref: string, path: string) => createHmac('sha256', attachmentKey).update(`${ref}\0${path}`).digest('hex');
   const attachmentUrl = (ref: string, path: string) => `/api/attachments?ref=${encodeURIComponent(ref)}&path=${encodeURIComponent(path)}&access=${access(ref, path)}`;
   async function attach(ref: string, body: Record<string, unknown>) {
@@ -156,10 +171,8 @@ export async function startApi(options: ApiOptions): Promise<{ close: () => Prom
       if (method === 'GET' && ['/api/web-client.js', '/api/cli.mjs', '/llms.txt'].includes(url.pathname)) {
         const cli = url.pathname === '/api/cli.mjs';
         if (cli && !options.readCli) throw new HttpError(404, '请将 cli.mjs 放入插件目录。', 'NOT_FOUND');
-        const text = cli ? await options.readCli!() : url.pathname === '/llms.txt'
-          ? `# Local Issues\n\n本地网页可管理项目、议题、评论、状态和附件，与 Obsidian 共用 Markdown 数据。\n\nCLI 下载：http://localhost:${actualPort}/api/cli.mjs\n保存为 cli.mjs，需要 Node.js 22+。不需要登录或密钥。\n\n${agentSkill('./cli.mjs', actualPort)}`
-          : `(${startWebClient.toString()})();`;
-        res.writeHead(200, { 'Content-Type': url.pathname === '/llms.txt' ? 'text/plain; charset=utf-8' : 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store',
+        const text = cli ? await options.readCli!() : url.pathname === '/llms.txt' ? agentGuide(skillOptions()) : `(${startWebClient.toString()})();`;
+        res.writeHead(200, { 'Content-Type': url.pathname === '/llms.txt' ? 'text/markdown; charset=utf-8' : 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store',
           'X-Content-Type-Options': 'nosniff', 'Cross-Origin-Resource-Policy': 'same-origin', ...(cli ? { 'Content-Disposition': 'attachment; filename="cli.mjs"' } : {}) });
         res.end(text); return;
       }
@@ -172,7 +185,7 @@ export async function startApi(options: ApiOptions): Promise<{ close: () => Prom
         send(res, 200, { ok: true, data: { html: renderMarkdown(str(body.body, 'body', false), { snapshot, routes, vaultName: options.vaultName,
           attachmentUrl, project: resolved?.kind === 'project' ? resolved.value : undefined, issue: resolved?.kind === 'issue' ? resolved.value : undefined }) } }); return;
       }
-      if (method === 'GET' && url.pathname === '/api/health') { send(res, 200, { ok: true, data: { name: 'Local Issues', version: '0.1.6' } }); return; }
+      if (method === 'GET' && url.pathname === '/api/health') { send(res, 200, { ok: true, data: { name: 'Local Issues', version: '0.2.1' } }); return; }
       if (method === 'GET' && url.pathname === '/api/attachments') {
         const path = attachmentPath(url.searchParams.get('path') ?? '');
         if (!path || !options.readAttachment) throw new HttpError(404, '附件不存在。', 'NOT_FOUND');
@@ -261,16 +274,16 @@ export async function startApi(options: ApiOptions): Promise<{ close: () => Prom
         } else if (parts.length === 2 && method === 'POST') {
           const body = await readBody(req); data = await store.createProject({ ...pick<ProjectPatch>(body, PROJECT_FIELDS), title: str(body.title, 'title') }); status = 201;
         } else if (parts.length === 3 && method === 'GET') {
-          const project = await store.getProject(parts[2]); data = { project, issues: (await store.snapshot()).issues.filter(i => i.projectId === project.id) };
+          const found = await findProject(parts[2]); data = { project: found, issues: (await store.snapshot()).issues.filter(i => i.projectId === found.id) };
         } else if (parts.length === 3 && method === 'PATCH') {
           const body = await readBody(req); data = await store.updateProject(parts[2], pick<ProjectPatch>(body, PROJECT_FIELDS), expected(req, body));
         } else if (parts.length === 4 && parts[3] === 'attachments' && method === 'POST') {
-          const project = await store.getProject(parts[2]); data = await attach(project.id, await readBody(req)); status = 201;
+          const found = await findProject(parts[2]); data = await attach(found.id, await readBody(req)); status = 201;
         } else throw new HttpError(404, '项目接口不存在。', 'NOT_FOUND');
       } else if (parts[1] === 'issues') {
         const project = url.searchParams.get('project') ?? undefined;
         if (parts.length === 2 && method === 'GET') {
-          const projectId = project ? (await store.getProject(project)).id : undefined;
+          const projectId = project ? (await findProject(project)).id : undefined;
           data = filteredIssues(await store.snapshot(), url.searchParams, projectId);
         } else if (parts.length === 2 && method === 'POST') {
           const body = await readBody(req);
@@ -295,6 +308,8 @@ export async function startApi(options: ApiOptions): Promise<{ close: () => Prom
         const body = await readBody(req); await store.deleteComment(parts[2], expected(req, body)); data = { deleted: true };
       } else if (parts[1] === 'open' && parts.length === 2 && method === 'POST' && options.open) {
         const body = await readBody(req); await options.open(str(body.ref, 'ref')); data = { opened: true };
+      } else if (parts[1] === 'skill' && parts.length === 2 && method === 'GET') {
+        data = agentSkill(skillOptions());
       } else if (parts[1] === 'resolve' && parts.length === 2 && method === 'GET') {
         data = await resolvedDetail(await store.resolve(str(url.searchParams.get('ref'), 'ref')));
       } else if (parts[1] === 'shares' && parts.length === 2 && method === 'POST') {

@@ -28,13 +28,12 @@ GitHub Issues 的本地 Obsidian 版。一个笔记库可以有多个项目，�
 
 需要 Node.js 22 或更新版本，并保持 Obsidian 和插件运行。
 
-1. 从 Release 下载 `cli.mjs`。放到插件目录后，可在插件设置点击 **复制 CLI 命令**；也可以放在其他目录，并使用 `--vault` 指定笔记库。
+1. 从 Release 下载 `cli.mjs` 放入插件目录（完整 ZIP 已包含；社区商店安装需另行下载）。
 2. 在插件设置中启用 **本地 Agent API**。全新安装时默认关闭。
-“复制 CLI 命令”会复制一份极简 Skill，包含工具用途、当前端口的链接识别规则和 CLI 示例，可粘贴给 agent，或保存为 `local-issues/SKILL.md`。
+3. 插件加载后会把全局命令 `local-issues` 写到 `~/.local/bin`，指向当前笔记库并通过 `--vault` 自动读取端口；端口改动无需重装。该目录不在 PATH 时会有提示，设置页也可随时「安装命令 / 移除命令」。
+4. 把用法交给 agent：**复制引导语** 会复制「把 skill 存到你自己的 skills 目录」的说明，agent 自己知道目录在哪；**复制 Skill** 只复制 `SKILL.md` 正文。也可以让 agent 自己执行 `local-issues skill`（或 `local-issues skill --dir <目录>` 直接落盘）。
 
-3. 运行 `node cli.mjs --vault "/笔记库路径" --help`。
-
-CLI 目前按默认 `.obsidian` 配置目录定位 API 设置。完整命令见 [English README](README.md#agent-cli)。
+命令缺失时用 `node '/插件目录/cli.mjs' --vault "/笔记库路径" --help` 代替。完整命令见 [English README](README.md#agent-cli)。
 
 分享内容是可读的语义化链接，例如 `http://localhost:27183/local-issues/issues/5`。浏览器打开即可新建和编辑项目、议题，在原位置编写／预览正文和评论、修改属性与父子／依赖关系、切换关闭原因、删除评论。支持粘贴图片、拖入附件，或在编辑区按 `⌘/Ctrl+Shift+U` 选择文件；`⌘/Ctrl+Enter` 提交。网页与 Obsidian 共用同一份 Markdown 数据和 revision 冲突检查，保存失败时保留草稿，离开或切换未保存的编辑前会要求确认。
 
@@ -42,7 +41,7 @@ CLI 目前按默认 `.obsidian` 配置目录定位 API 设置。完整命令见 
 
 同一链接交给 agent 时，用 CLI 直接读取 JSON。仓库首页、项目、Issues 列表和具体议题均可复制对应链接；列表链接保留筛选参数。无需登录或密钥。网页支持常见 Markdown、任务列表、表格及双链；笔记嵌入、标题／块引用和复杂 Obsidian 渲染请在 Obsidian 中查看。
 
-`http://localhost:27183/llms.txt` 提供 Agent 使用说明；`http://localhost:27183/api/cli.mjs` 下载当前插件目录中的独立 CLI，需要 Node.js 22+。插件目录缺少 CLI 时会提示下载失败，不会自动安装软件。
+`http://localhost:27183/llms.txt` 提供 Agent 自举说明（含保存 skill 的办法，网页里不显示这一段）；`http://localhost:27183/api/cli.mjs` 下载当前插件目录中的独立 CLI，需要 Node.js 22+。插件目录缺少 CLI 时会提示下载失败，不会自动安装软件。
 
 ```sh
 local-issues view '<资源链接>' --json
@@ -53,7 +52,7 @@ local-issues issue comment '<议题链接>' --body-file reply.md
 local-issues issue close '<议题链接>'
 ```
 
-从源码目录运行 `npm install -g .` 后可使用 `local-issues` 命令（Windows 也适用）。上例 `local-issues` 可替换为 `node '/路径/cli.mjs'`。详细路由与命令见[链接与 CLI 使用说明](docs/agent-cli.zh-CN.md)。
+插件会自动安装 `local-issues` 命令；也可以从源码目录运行 `npm install -g .`（Windows 也适用）。上例 `local-issues` 可替换为 `node '/路径/cli.mjs' --vault '/笔记库路径'`。项目参数 `-P` 接受项目标题、文件夹名或链接里的项目名。详细路由与命令见[链接与 CLI 使用说明](docs/agent-cli.zh-CN.md)。
 
 ## 文件和隐私
 

@@ -13,7 +13,7 @@ GitHub Issues-style project tracking inside an Obsidian vault. Organize projects
 - Native Obsidian links, hyperlinks, attachments, pasted images and dropped files.
 - An optional loopback API and a separate agent CLI with familiar `gh`-style commands and JSON output.
 - Semantic links open a local web interface for creating and editing projects/issues, inline Markdown editing and previews, comments, close reasons, attachments, relations and bulk updates. Lists default to open issues and support search, filters, sorting, grouping, board and table views. Drag cards to change state. The web interface and Obsidian share the same Markdown files and revision checks, with no polling or external dependencies at runtime. Note embeds, heading/block references and advanced Obsidian rendering open in Obsidian.
-- `/llms.txt` provides agent instructions and `/api/cli.mjs` downloads the installed standalone CLI (Node.js 22+).
+- `/llms.txt` provides the agent bootstrap (including how to save the skill; web pages do not show it) and `/api/cli.mjs` downloads the installed standalone CLI (Node.js 22+).
 - Revision checks and atomic writes protect edits made directly in your notes.
 
 ![Issue board with sample data](docs/images/board.png)
@@ -32,9 +32,12 @@ Open the ribbon button **Local Issues：项目**, or run **Local Issues：打开
 
 The CLI requires Node.js 22+ and a running desktop Obsidian instance with Local Issues enabled.
 
-1. Download `cli.mjs` from the same [release](https://github.com/xinxinrana/obsidian-local-issues/releases/latest). You can keep it anywhere and pass `--vault`, or put it in the plugin folder to use **复制 CLI 命令** in plugin settings.
+1. Download `cli.mjs` from the same [release](https://github.com/xinxinrana/obsidian-local-issues/releases/latest) into the plugin folder (the ZIP already includes it).
 2. Enable **本地 Agent API** in plugin settings. It is disabled by default on a new installation.
-3. Run `node cli.mjs --vault "/path/to/vault" --help`.
+3. The plugin installs a global `local-issues` command into `~/.local/bin`, bound to this vault and reading the port through `--vault`, so port changes need no reinstall. Settings can reinstall or remove it; you are told when the folder is missing from `PATH`.
+4. **复制引导语** copies a short hand-off telling the agent to save the skill into its own skills directory; **复制 Skill** copies `SKILL.md` only. Agents can also run `local-issues skill` (or `local-issues skill --dir <dir>`).
+
+Without the command, use `node '/path/to/plugin/cli.mjs' --vault "/path/to/vault" --help`.
 
 **复制 CLI 命令** copies a minimal skill with the tool purpose, current port, semantic link routing and CLI examples. Paste it to an agent or save it as `local-issues/SKILL.md`.
 
@@ -81,7 +84,7 @@ local-issues issue close '<issue URL>'
 local-issues issue reopen '<issue URL>'
 ```
 
-Install from the source directory with `npm install -g .` to make the `local-issues` command available, including on Windows. `local-issues view` infers the target type. Replace `local-issues` with `node '/absolute/path/cli.mjs'` if needed. Existing legacy share URLs and `local-issues share ...` commands remain compatible. See the [link and CLI guide](docs/agent-cli.zh-CN.md).
+The plugin installs the `local-issues` command; `npm install -g .` from the source directory also works, including on Windows. `local-issues view` infers the target type; `-P` accepts a project title, folder name or the project name from a link. Replace `local-issues` with `node '/absolute/path/cli.mjs' --vault '/path/to/vault'` if needed. Existing legacy share URLs and `local-issues share ...` commands remain compatible. See the [link and CLI guide](docs/agent-cli.zh-CN.md).
 
 ## Local data and privacy
 

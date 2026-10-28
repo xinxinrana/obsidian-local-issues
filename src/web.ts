@@ -36,7 +36,8 @@ const editingCss = `
 `;
 
 export function htmlDocument(title: string, content: string): string {
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · Local Issues</title><style>${css}${editingCss}</style><script src="/api/web-client.js" defer></script></head><body>${content}</body></html>`;
+  // Agents that fetch a page get a pointer to the CLI/skill docs; humans never see it.
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><!-- Agent: GET /llms.txt for the CLI and skill setup. --><link rel="llms" type="text/markdown" href="/llms.txt" title="Agent usage"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · Local Issues</title><style>${css}${editingCss}</style><script src="/api/web-client.js" defer></script></head><body>${content}</body></html>`;
 }
 
 export interface WebPage {

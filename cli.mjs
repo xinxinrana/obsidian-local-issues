@@ -46,14 +46,15 @@ function parseResource(url) {
 }
 
 // src/cli.ts
-import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { resolve, dirname, basename } from "node:path";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { resolve, dirname, basename, join } from "node:path";
 var HELP = `Local Issues \xB7 Obsidian \u672C\u5730\u9879\u76EE\u4E0E Issues
 
 \u7528\u6CD5: local-issues <\u547D\u4EE4> [\u53C2\u6570] [\u9009\u9879]
 
   view <\u8BED\u4E49\u5316URL>
-  repo view <\u4ED3\u5E93URL> | link
+  repo view [\u4ED3\u5E93URL] | link
+  skill [--dir <\u76EE\u5F55>]               \u8F93\u51FA SKILL.md\uFF0C\u6216\u5199\u5230 <\u76EE\u5F55>/local-issues/SKILL.md
   project list | view <\u9879\u76EE> | create | edit <\u9879\u76EE> | share <\u9879\u76EE>
   issue list | view <\u7F16\u53F7/\u53CC\u94FE/ID/\u5206\u4EABURL> | create | edit <\u5F15\u7528>
   issue comment <\u5F15\u7528> | close <\u5F15\u7528> | reopen <\u5F15\u7528>
@@ -86,6 +87,7 @@ var HELP = `Local Issues \xB7 Obsidian \u672C\u5730\u9879\u76EE\u4E0E Issues
       --web                \u5728 Obsidian \u4E2D\u6253\u5F00
       --vault <\u7B14\u8BB0\u5E93\u8DEF\u5F84> \u4F7F\u7528\u8BE5\u7B14\u8BB0\u5E93\u7684\u672C\u5730 API \u8BBE\u7F6E
       --if-match <\u65F6\u95F4>    \u4EC5\u5F53 updatedAt \u5339\u914D\u65F6\u4FEE\u6539\uFF0C\u9632\u6B62\u8986\u76D6
+      --dir <\u76EE\u5F55>         skill \u7684\u843D\u76D8\u76EE\u5F55\uFF08\u5199\u6210 <\u76EE\u5F55>/local-issues/SKILL.md\uFF09
 
 \u793A\u4F8B:
   local-issues project create -t "\u6211\u7684\u9879\u76EE"
@@ -100,7 +102,7 @@ var HELP = `Local Issues \xB7 Obsidian \u672C\u5730\u9879\u76EE\u4E0E Issues
 var aliases = { c: "comments", P: "project", t: "title", b: "body", F: "body-file", l: "label", a: "assignee", s: "state", S: "search", L: "limit", h: "help", X: "method", f: "field", H: "header" };
 var booleans = /* @__PURE__ */ new Set(["help", "web", "comment", "comments"]);
 var multiples = /* @__PURE__ */ new Set(["label", "assignee", "depends-on", "add-label", "remove-label", "field", "header"]);
-var allowed = /* @__PURE__ */ new Set(["project", "title", "body", "body-file", "state", "status", "label", "assignee", "milestone", "parent", "depends-on", "due-date", "author", "search", "limit", "json", "web", "vault", "url", "if-match", "help", "method", "field", "header", "comment", "add-label", "remove-label", "description", "comments", "reason"]);
+var allowed = /* @__PURE__ */ new Set(["project", "title", "body", "body-file", "state", "status", "label", "assignee", "milestone", "parent", "depends-on", "due-date", "author", "search", "limit", "json", "web", "vault", "url", "if-match", "help", "method", "field", "header", "comment", "add-label", "remove-label", "description", "comments", "reason", "dir"]);
 function parse(argv) {
   const args = [], flags = {};
   for (let i = 0; i < argv.length; i++) {
@@ -218,7 +220,7 @@ function print(data, flags, kind) {
       console.log("\u6CA1\u6709\u5339\u914D\u7684\u6761\u76EE\u3002");
       return;
     }
-    for (const item of data) console.log(kind === "project" ? `${item.title}	${item.status}	${item.closedCount ?? 0}/${item.issueCount ?? 0}	${item.id}` : `#${item.number}	${item.status}	${item.title}	${(item.labels ?? []).join(", ")}`);
+    for (const item of data) console.log(kind === "project" || item && typeof item === "object" && !("number" in item) && "title" in item ? `${item.title}	${item.status}	${item.closedCount ?? 0}/${item.issueCount ?? 0}	${item.id}` : `#${item.number}	${item.status}	${item.title}	${(item.labels ?? []).join(", ")}`);
     return;
   }
   if (data?.url) {
@@ -339,8 +341,19 @@ async function main() {
     } else throw new Error("\u5206\u4EAB\u94FE\u63A5\u652F\u6301 view\u3001edit\u3001comment\u3001comment-edit\u3001close\u3001reopen\u3002");
   } else if (command === "repo") {
     if (action === "view" && resourceUrl && resource?.kind === "repo") data = await api.request(resourceUrl.toString());
+    else if (action === "view" && !ref) data = await api.request("/");
     else if (action === "link") data = await api.request("/api/links");
-    else throw new Error("\u7528\u6CD5\uFF1Alocal-issues repo view <\u4ED3\u5E93URL> \u6216 local-issues repo link");
+    else throw new Error("\u7528\u6CD5\uFF1Alocal-issues repo view [\u4ED3\u5E93URL] \u6216 local-issues repo link");
+  } else if (command === "skill") {
+    const text = await api.request("/api/skill");
+    const dir = val(flags, "dir");
+    if (!dir) data = text;
+    else {
+      const target = join(resolve(dir), "local-issues", "SKILL.md");
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, text);
+      data = `\u5DF2\u5199\u5165 ${target}`;
+    }
   } else if (command === "project") {
     if (action === "list") {
       const query = new URLSearchParams();

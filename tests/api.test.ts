@@ -38,7 +38,7 @@ test('API loopback Host, browser rejection and legacy target routes', async () =
   const f = await fixture();
   try {
     const health = await fetch(`${f.url}/api/health`); assert.equal(health.status, 200);
-    assert.deepEqual(await health.json(), { ok: true, data: { name: 'Local Issues', version: '0.1.6' } });
+    assert.deepEqual(await health.json(), { ok: true, data: { name: 'Local Issues', version: '0.2.1' } });
     assert.equal((await fetch(`${f.url}/api/projects`)).status, 200);
     const invalidHost = await new Promise<number>((resolve, reject) => {
       const req = httpRequest(`${f.url}/api/projects`, { headers: { Host: 'evil.test' } }, res => { res.resume(); resolve(res.statusCode!); }); req.on('error', reject); req.end();
@@ -137,5 +137,27 @@ test('semantic resource URLs identify repo, project, list and issue without cred
     const chineseUrl = (await f.request(`/api/links?ref=${chinese.id}`)).data.url;
     assert.match(chineseUrl, /产品-设计-方案/);
     assert.equal((await f.request(chineseUrl)).data.project.id, chinese.id);
+  } finally { await f.close(); }
+});
+
+test('agent docs bootstrap a skill without hard-coded agent directories', async () => {
+  const f = await fixture();
+  try {
+    const skill = (await f.request('/api/skill')).data as string;
+    assert.match(skill, /^---\nname: local-issues\n/);
+    assert.ok(skill.includes(`local-issues view 'http://localhost:${new URL(f.url).port}/项目/issues/5'`), 'skill uses the running origin');
+    assert.match(skill, /## 查[\s\S]*## 改[\s\S]*## 兜底/);
+    const guide = await (await fetch(`${f.url}/llms.txt`)).text();
+    assert.match(guide, /## 给 Agent：保存这份 skill/);
+    assert.match(guide, /local-issues skill/);
+    assert.ok(guide.includes(`http://localhost:${new URL(f.url).port}/api/cli.mjs`), 'guide points at the downloadable CLI');
+    assert.doesNotMatch(guide, /\.claude|\.codex|\.pi\//, 'never hard-code another agent skill directory');
+
+    const p = await f.store.createProject({ title: 'Slug 项目' });
+    const folder = p.path.split('/').slice(-2, -1)[0]!;
+    assert.equal((await f.request(`/api/projects/${encodeURIComponent(folder)}`)).data.project.id, p.id);
+    const slugOfUrl = decodeURIComponent(new URL((await f.request(`/api/links?ref=${p.id}`)).data.url).pathname.split('/').filter(Boolean)[0]!);
+    assert.equal((await f.request(`/api/issues?project=${encodeURIComponent(slugOfUrl)}`)).status, 200);
+    assert.equal((await f.request(`/api/issues?project=${encodeURIComponent(folder)}`)).status, 200);
   } finally { await f.close(); }
 });

@@ -103,13 +103,18 @@ test('bundled plugin registers native entry points; Vault adapter, protocol, API
       assert.equal(destinations.length, 1, form.textContent!);
       assert.ok((await plugin.store.snapshot()).timeline.some((entry: any) => entry.body === '从实际插件构建的网页提交'));
     } finally { web.window.close(); }
-    await plugin.copyCli();
-    assert.match(clipboard[0], /^---\nname: local-issues\n/);
-    assert.ok(clipboard[0].includes(`http://localhost:${new URL(share).port}/`), 'Use the running API port, including dynamically allocated ports');
-    assert.match(clipboard[0], /node .*cli\.mjs.* --url 'http:\/\/localhost:\d+'/);
-    assert.match(clipboard[0], /view '<链接>' --json/);
-    assert.match(clipboard[0], /issue comment/);
-    assert.match(clipboard[0], /Obsidian/);
+    await plugin.copyGuide();
+    assert.match(clipboard.at(-1)!, /^# Local Issues\n/);
+    assert.ok(clipboard.at(-1)!.includes(`http://localhost:${new URL(share).port}/`), 'Use the running API port, including dynamically allocated ports');
+    assert.match(clipboard.at(-1)!, /## 给 Agent：保存这份 skill/);
+    assert.match(clipboard.at(-1)!, /local-issues skill/);
+    assert.doesNotMatch(clipboard.at(-1)!, /\.claude|\.codex|\.pi\//, 'Never hard-code other agents skill directories');
+    assert.match(clipboard.at(-1)!, /node '.*cli\.mjs'/);
+    assert.match(clipboard.at(-1)!, /issue comment/);
+    assert.match(clipboard.at(-1)!, /Obsidian/);
+    await plugin.copySkill();
+    assert.match(clipboard.at(-1)!, /^---\nname: local-issues\n/);
+    assert.match(clipboard.at(-1)!, /local-issues view 'http:\/\/localhost:\d+\//);
     assert.match(await plugin.resourceLink(i.id), /\/issues\/1$/);
     assert.match(await plugin.resourceLink(p.id), /^http:\/\/localhost:\d+\/[^/]+$/);
     plugin.openSettings(); assert.match(mock.modals.at(-1).contentEl.textContent, /本地 Agent API/);
