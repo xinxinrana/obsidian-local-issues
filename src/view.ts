@@ -370,7 +370,6 @@ export class IssuesView extends ItemView {
     const liveContainer = el(container, 'div', 'li-live-editor');
     const preview = el(container, 'div', 'li-editor-preview markdown-rendered'); preview.hidden = true;
     const footer = el(container, 'div', 'li-editor-footer');
-    const files = el(container, 'input'); files.type = 'file'; files.multiple = true; files.hidden = true;
     let disposed = false, uploads = 0;
     const view = createLiveMarkdown(this.app, liveContainer, initial, sourcePath, value => changed?.(value));
     const destroy = () => { if (!disposed) { disposed = true; view.destroy(); } };
@@ -380,17 +379,12 @@ export class IssuesView extends ItemView {
     const insert = (text: string) => { const { from, to } = view.state.selection.main; view.dispatch({ changes: { from, to, insert: text }, selection: { anchor: from + text.length } }); focus(); };
     const write = action(tools, '编写', () => { liveContainer.hidden = false; preview.hidden = true; write.addClass('is-active'); previewButton.removeClass('is-active'); focus(); });
     const previewButton = action(tools, '预览', () => { liveContainer.hidden = true; preview.hidden = false; preview.replaceChildren(); safe(() => MarkdownRenderer.render(this.app, getValue() || '*暂无内容*', preview, sourcePath, this.renderScope)); write.removeClass('is-active'); previewButton.addClass('is-active'); });
-    write.addClass('is-active'); el(tools, 'div', 'li-spacer');
-    for (const [name, label, before, after] of [['B', '粗体', '**', '**'], ['<>', '代码', '`', '`'], ['☷', '列表', '- ', '']] as const) { const button = action(tools, name, () => { const { from, to } = view.state.selection.main; const selected = view.state.sliceDoc(from, to); view.dispatch({ changes: { from, to, insert: before + selected + after }, selection: { anchor: from + before.length, head: from + before.length + selected.length } }); focus(); }, 'li-subtle'); button.setAttribute('aria-label', label); }
-    action(tools, '插入双链', () => this.linkModal(insert), 'li-subtle');
-    const attachment = action(footer, '添加附件', () => files.click(), 'li-subtle'); attachment.title = '添加附件，也可粘贴图片或拖放文件';
+    write.addClass('is-active');
     const uploadStatus = el(footer, 'span', 'li-upload-status li-muted'); uploadStatus.setAttribute('aria-live', 'polite');
     const actions = el(footer, 'div', 'li-editor-actions');
     const attach = async (list: File[]) => { uploads++; container.dataset.uploading = 'true'; uploadStatus.textContent = '正在保存附件…'; try { for (const file of list) { const saved = await this.host.store.attach(ref, file.name, new Uint8Array(await file.arrayBuffer())); if (!disposed) insert(`\n${saved.markdown}\n`); } } finally { if (--uploads === 0) { delete container.dataset.uploading; uploadStatus.textContent = ''; } } };
-    files.addEventListener('change', () => { const list = [...(files.files || [])]; if (list.length) safe(() => attach(list)); files.value = ''; });
     view.contentDOM.addEventListener('paste', event => { const list = [...(event.clipboardData?.files || [])]; if (!list.length) return; event.preventDefault(); safe(() => attach(list)); }, true);
     container.addEventListener('dragover', event => { if (event.dataTransfer?.types.includes('Files')) { event.preventDefault(); container.addClass('is-dragover'); } }); container.addEventListener('dragleave', () => container.removeClass('is-dragover')); container.addEventListener('drop', event => { container.removeClass('is-dragover'); const list = [...(event.dataTransfer?.files || [])]; if (!list.length) return; event.preventDefault(); safe(() => attach(list)); });
     return { element: container, get value() { return getValue(); }, get uploading() { return uploads > 0; }, actions, focus, destroy, clear: () => { if (!disposed) view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: '' } }); } };
   }
-  private linkModal(insert: (text: string) => void) { const modal = this.modal('插入笔记双链'); const search = input(modal.contentEl, '搜索笔记'); const results = el(modal.contentEl, 'div', 'li-link-results'); const notes = this.app.vault.getMarkdownFiles(); const render = () => { results.replaceChildren(); const matches = notes.filter(note => note.path.toLowerCase().includes(search.value.toLowerCase())).slice(0, 30); for (const note of matches) action(results, note.path, () => { const link = `[[${note.path.replace(/\.md$/, '')}]]`; modal.close(); insert(link); }, 'li-link-result'); if (!matches.length) el(results, 'p', 'li-muted', '没有匹配的笔记'); }; search.addEventListener('input', render); render(); modal.open(); search.focus(); }
 }
