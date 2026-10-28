@@ -39,7 +39,7 @@ test('bundled plugin registers native entry points; Vault adapter, protocol, API
       onLayoutReady() {}, getActiveFile: () => null,
       getLeavesOfType: () => leaves,
       getLeaf: () => {
-        const leaf: any = { app, async setViewState(state: { type: string }) { leaf.view = plugin.views.get(state.type)(leaf); leaves.push(leaf); await leaf.view.onOpen(); } }; return leaf;
+        const leaf: any = { app, async setViewState(state: { type: string; state?: any }) { if (!leaf.view) { leaf.view = plugin.views.get(state.type)(leaf); leaves.push(leaf); await leaf.view.onOpen(); } await leaf.view.setState(state.state || {}, { history: false }); } }; return leaf;
       },
       revealLeaf: async () => {}, openLinkText: async (p: string) => { openedNotes.push(p); },
     },

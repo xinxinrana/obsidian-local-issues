@@ -31,7 +31,7 @@ body:has(.li-no-tooltips:hover) .tooltip,
   background: transparent; box-shadow: none; border: 0; color: var(--text-muted);
 }
 .local-issues :is(button.li-subtle,button.li-breadcrumb,button.li-more):hover { background: var(--background-modifier-hover); color: var(--text-normal); }
-.local-issues .li-topbar { display: flex; align-items: center; gap: 6px; margin-bottom: 18px; min-width: 0; }
+.local-issues .li-topbar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: -20px 0 18px; padding-block: 12px; min-width: 0; position: sticky; top: 0; z-index: 10; background: var(--background-primary); border-bottom: 1px solid var(--li-border); }
 .local-issues .li-topbar button { height: 26px; padding: 2px 6px; font-size: var(--font-ui-small); }
 .local-issues .li-topbar .li-breadcrumb { overflow: hidden; text-overflow: ellipsis; max-width: 55%; }
 .local-issues .li-heading, .local-issues .li-detail-header { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; min-width: 0; }
@@ -67,7 +67,7 @@ body:has(.li-no-tooltips:hover) .tooltip,
 .local-issues .li-table td:last-child { text-align: end; }
 .local-issues .li-issues-table :is(td,th):first-child { width: 30px; min-width: 30px; }
 .local-issues .li-issues-table td:nth-child(2) { min-width: 220px; }
-.local-issues :is(button.li-project-title,button.li-issue-title) { padding: 0; height: auto; color: var(--text-normal); font-weight: 600; white-space: normal; text-align: start; font-size: var(--font-ui-medium); }
+.local-issues :is(button.li-project-title,button.li-issue-title) { padding: 0; height: auto; min-width: 0; max-width: 100%; overflow-wrap: anywhere; color: var(--text-normal); font-weight: 600; white-space: normal; text-align: start; font-size: var(--font-ui-medium); }
 .local-issues :is(button.li-project-title,button.li-issue-title):hover { color: var(--interactive-accent); }
 .local-issues .li-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 360px; margin-top: 3px; }
 .local-issues .li-projects td:nth-child(2) { white-space: nowrap; }
@@ -80,7 +80,7 @@ body:has(.li-no-tooltips:hover) .tooltip,
 .local-issues .li-status-open { color: var(--color-green); }
 .local-issues .li-status-in-progress { color: var(--color-orange); }
 .local-issues .li-status-closed { color: var(--color-purple); }
-.local-issues .li-label { display: inline-flex; align-items: center; border: 1px solid var(--li-border); border-radius: 12px; padding: 0 7px; font-size: var(--font-ui-smaller); line-height: 1.7; white-space: nowrap; background: var(--background-secondary); }
+.local-issues .li-label { display: inline-flex; align-items: center; max-width: 100%; overflow-wrap: anywhere; border: 1px solid var(--li-border); border-radius: 12px; padding: 0 7px; font-size: var(--font-ui-smaller); line-height: 1.7; white-space: normal; background: var(--background-secondary); }
 .local-issues .li-issue-list { border: 1px solid var(--li-border); border-radius: var(--radius-m); overflow: hidden; }
 .local-issues .li-issue-row { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--li-border); }
 .local-issues .li-issue-row:last-child { border-bottom: 0; }
@@ -90,6 +90,8 @@ body:has(.li-no-tooltips:hover) .tooltip,
 .local-issues .li-issue-title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
 .local-issues .li-issue-meta { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 5px; }
 .local-issues .li-batch { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 10px 0; font-size: var(--font-ui-small); }
+.local-issues .li-select-all { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+.local-issues .li-batch-feedback { margin-bottom: 10px; overflow-wrap: anywhere; color: var(--text-muted); font-size: var(--font-ui-small); }
 .local-issues .li-board { display: grid; grid-template-columns: repeat(2,minmax(230px,1fr)); gap: 14px; align-items: start; overflow-x: auto; padding-bottom: 16px; }
 .local-issues .li-board-column { background: var(--background-secondary); border: 1px solid var(--li-border); border-radius: var(--radius-m); padding: 12px; min-height: 240px; }
 .local-issues .li-board-column.is-dragover { border-color: var(--interactive-accent); }
@@ -99,7 +101,7 @@ body:has(.li-no-tooltips:hover) .tooltip,
 .local-issues .li-card:hover { border-color: var(--interactive-accent); }
 .local-issues .li-card select { height: 26px; font-size: var(--font-ui-small); margin-top: 8px; }
 .local-issues .li-detail-header { align-items: flex-start; }
-.local-issues .li-detail-title { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.local-issues .li-detail-title { display: flex; align-items: baseline; flex-wrap: wrap; flex: 1 1 320px; gap: 8px; min-width: 0; }
 .local-issues .li-detail-title h1 { overflow-wrap: anywhere; }
 .local-issues .li-issue-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 12px 0 16px; border-bottom: 1px solid var(--li-border); }
 .local-issues .li-issue-summary .li-status { border: 1px solid currentColor; border-radius: 20px; padding: 2px 10px; }
@@ -108,6 +110,19 @@ body:has(.li-no-tooltips:hover) .tooltip,
 .local-issues .li-sidebar { min-width: 0; border-inline-start: 1px solid var(--li-border); padding-inline-start: 20px; }
 .local-issues .li-sidebar > h3 { margin-bottom: 14px; }
 .local-issues .li-sidebar .li-subtle { white-space: normal; height: auto; text-align: start; }
+.local-issues .li-property-display { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.local-issues .li-property-display button { min-width: 0; max-width: 100%; padding: 3px 0; overflow-wrap: anywhere; }
+.local-issues .li-property-value { color: var(--text-muted); }
+.local-issues .li-property-editor { min-width: 0; width: 100%; }
+.local-issues .li-property-editor input { min-width: 0; width: 100%; }
+.local-issues .li-property-editor select { min-width: 0; max-width: 100%; width: 100%; }
+.local-issues .li-property-choices { display: flex; flex-wrap: wrap; gap: 4px; max-height: 180px; overflow: auto; margin-top: 6px; }
+.local-issues .li-property-choices button { white-space: normal; overflow-wrap: anywhere; min-width: 0; max-width: 100%; font-size: var(--font-ui-small); }
+.local-issues .li-property-choices button[aria-pressed="true"] { background: var(--background-modifier-hover); color: var(--text-accent); }
+.local-issues .li-field:has(.li-property-editor) > .li-property-links { display: none; }
+.local-issues .li-property-editor .li-inline-actions { flex-wrap: wrap; padding-bottom: 0; }
+.local-issues .li-form-error:not(:empty) { margin: 8px 0; color: var(--text-error); overflow-wrap: anywhere; font-size: var(--font-ui-small); }
+.local-issues .li-form-error:empty { display: none; }
 .local-issues .li-comment { border: 1px solid var(--li-border); border-radius: var(--radius-m); overflow: hidden; margin-bottom: 16px; }
 .local-issues .li-comment-header { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 14px; background: var(--background-secondary); border-bottom: 1px solid var(--li-border); font-size: var(--font-ui-small); }
 .local-issues .li-comment-header strong { font-weight: 600; }
@@ -118,7 +133,10 @@ body:has(.li-no-tooltips:hover) .tooltip,
 .local-issues .li-markdown img { max-width: 100%; height: auto; border-radius: 4px; }
 .local-issues .li-markdown pre { overflow-x: auto; }
 .local-issues .li-relations { border: 1px solid var(--li-border); border-radius: var(--radius-m); padding: 12px 16px; margin: 16px 0; }
-.local-issues .li-relation { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.local-issues .li-relation { display: grid; grid-template-columns: auto minmax(0,1fr); align-items: start; gap: 6px 12px; margin-top: 8px; min-width: 0; }
+.local-issues .li-relation > .li-status { margin-top: 3px; }
+.local-issues .li-relation > button { min-width: 0; max-width: 100%; height: auto; white-space: normal; overflow-wrap: anywhere; text-align: start; }
+.local-issues .li-sidebar .li-relation { grid-template-columns: minmax(0,1fr); gap: 2px; }
 .local-issues .li-timeline { margin: 20px 0; }
 .local-issues .li-event { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0 0 16px 10px; border-inline-start: 2px solid var(--li-border); padding: 4px 0 4px 14px; color: var(--text-muted); font-size: var(--font-ui-small); }
 .local-issues .li-composer h3 { margin-bottom: 10px; }
@@ -171,6 +189,8 @@ body:has(.li-no-tooltips:hover) .tooltip,
 .li-modal-container > .modal-content.local-issues.li-modal { flex: 1 1 auto; min-height: 0; width: auto; height: auto; overflow-y: auto; padding: 0 24px 8px; margin: 0; container: local-issues-dialog / inline-size; }
 .li-modal-container > .li-modal-actions { flex: 0 0 auto; display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 14px 24px; border-top: 1px solid var(--background-modifier-border); background: var(--background-primary); }
 .li-modal-container .li-modal-actions button { min-width: 70px; }
+.modal.li-text-dialog { width: min(460px,calc(100vw - 40px)); }
+.li-text-dialog .li-dialog-hint { margin-bottom: 8px; }
 .li-modal-container .li-editor textarea { min-height: 150px; max-height: 36dvh; }
 .local-issues .li-properties { border: 1px solid var(--li-border); border-radius: var(--radius-m); background: var(--background-secondary); margin: 4px 0 8px; }
 .local-issues .li-properties > summary { cursor: pointer; padding: 12px 14px; font-size: var(--font-ui-small); font-weight: 600; }
@@ -179,6 +199,7 @@ body:has(.li-no-tooltips:hover) .tooltip,
 .local-issues .li-properties > .li-field { margin: 0 14px 14px; }
 @container local-issues (max-width: 800px) {
   .local-issues .li-shell { padding: 16px 18px 28px; }
+  .local-issues .li-topbar { margin-top: -16px; }
   .local-issues .li-heading { align-items: flex-start; }
   .local-issues .li-board { grid-template-columns: repeat(2,250px); }
   .local-issues .li-detail { grid-template-columns: minmax(0,1fr) 175px; gap: 18px; }
@@ -189,6 +210,8 @@ body:has(.li-no-tooltips:hover) .tooltip,
   .local-issues .li-sidebar { order: -1; display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: baseline; border: 0; border-bottom: 1px solid var(--li-border); padding: 0 0 12px; }
   .local-issues .li-sidebar > h3 { width: 100%; margin: 0; }
   .local-issues .li-sidebar .li-field { margin: 0; }
+  .local-issues .li-sidebar .li-field { flex: 1 1 160px; max-width: 100%; }
+  .local-issues .li-relations .li-relation { grid-template-columns: minmax(0,1fr); gap: 2px; }
   .local-issues .li-search-row input[type="text"] { flex-basis: 100%; }
   .local-issues .li-table { display: block; overflow-x: auto; }
 }
