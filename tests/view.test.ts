@@ -20,7 +20,8 @@ test('real view supports project → issue → Markdown comments, pasted and dro
   const files = new Map<string, string>(), binary = new Map<string, Uint8Array>();
   const adapter: VaultAdapter = { list: async () => [...files.keys()], read: async p => files.get(p)!,
     write: async (p, text, expectedRaw) => { if (expectedRaw !== undefined && files.get(p) !== expectedRaw) throw new Error('写入冲突'); files.set(p, text); }, exists: async p => files.has(p) || binary.has(p),
-    writeBinary: async (p, bytes) => { binary.set(p, bytes); } };
+    writeBinary: async (p, bytes) => { binary.set(p, bytes); },
+    removeFolder: async p => { for (const key of [...files.keys()]) if (key.startsWith(`${p}/`)) files.delete(key); } };
   const store = new Store(adapter), copied: string[] = [], opened: string[] = [], shared: string[] = [];
   const app = { metadataCache: { getFirstLinkpathDest: () => null }, vault: { getMarkdownFiles: () => [...files.keys()].map(path => ({ path })) }, workspace: { openLinkText: async () => {} } };
   const host = { store, author: 'Evan', openNote: async (path: string) => { opened.push(path); }, resourceLink: async (ref?: string) => { shared.push(ref); return 'http://localhost:27183/local-issues/issues/5'; }, openSettings() {} };

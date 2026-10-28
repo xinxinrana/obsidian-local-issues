@@ -21,6 +21,8 @@ export interface VaultAdapter {
   write(path: string, content: string, expectedRaw?: string): Promise<void>;
   writeBinary(path: string, data: Uint8Array): Promise<void>;
   exists(path: string): Promise<boolean>;
+  /** Moves a project folder to the vault/system trash so a mistaken delete stays recoverable. */
+  removeFolder(path: string): Promise<void>;
 }
 export type ProjectInput = Pick<Project, 'title'> & Partial<Pick<Project, 'description' | 'status' | 'dueDate'>>;
 export type ProjectPatch = Partial<ProjectInput>;
@@ -33,6 +35,7 @@ export interface IssueStore {
   getIssue(ref: string, project?: string): Promise<Issue>;
   createProject(input: ProjectInput): Promise<Project>;
   updateProject(ref: string, patch: ProjectPatch, expectedUpdatedAt?: string): Promise<Project>;
+  deleteProject(ref: string, force?: boolean): Promise<{ project: Project; issues: number; folder: string }>;
   createIssue(project: string, input: IssueInput): Promise<Issue>;
   updateIssue(ref: string, patch: IssuePatch, expectedUpdatedAt?: string): Promise<Issue>;
   addComment(ref: string, body: string, author?: string): Promise<TimelineEntry>;

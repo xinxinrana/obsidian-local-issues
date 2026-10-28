@@ -11,6 +11,10 @@ class Memory implements VaultAdapter {
   async read(path: string) { if (!this.files.has(path)) throw new Error('missing'); return this.files.get(path)!; }
   async write(path: string, content: string) { this.files.set(path, content); }
   async writeBinary(path: string, data: Uint8Array) { this.binary.set(path, data); }
+  async removeFolder(path: string) {
+    for (const key of [...this.files.keys()]) if (key.startsWith(`${path}/`)) this.files.delete(key);
+    for (const key of [...this.binary.keys()]) if (key.startsWith(`${path}/`)) this.binary.delete(key);
+  }
 }
 function setup() { const adapter = new Memory(); return { adapter, store: new Store(adapter) }; }
 
@@ -227,4 +231,20 @@ test('closed reasons persist, reopen clears the reason and legacy statuses remai
   await assert.rejects(store.updateIssue(i.id, { closeReason: 'invalid' as any }), /未知状态/);
   adapter.files.set(i.path, adapter.files.get(i.path)!.replace(/closeReason: "?completed"?\n/, ''));
   assert.equal((await store.getIssue(i.id)).closeReason, 'completed');
+});
+
+test('project deletion needs force while issues remain and clears the folder', async () => {
+  const { adapter, store } = setup();
+  const empty = await store.createProject({ title: '空项目' });
+  const removed = await store.deleteProject(empty.id);
+  assert.equal(removed.issues, 0);
+  assert.equal(adapter.files.size, 0, 'the project folder is gone');
+  const busy = await store.createProject({ title: '非空项目' });
+  await store.createIssue(busy.id, { title: '议题' });
+  await assert.rejects(() => store.deleteProject(busy.id), /还有 1 条议题/);
+  assert.equal((await store.snapshot()).projects.length, 1, 'a refused delete leaves the project alone');
+  const forced = await store.deleteProject(busy.id, true);
+  assert.equal(forced.issues, 1);
+  assert.equal((await store.snapshot()).projects.length, 0);
+  assert.equal(adapter.files.size, 0);
 });

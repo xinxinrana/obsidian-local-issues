@@ -277,6 +277,10 @@ export async function startApi(options: ApiOptions): Promise<{ close: () => Prom
           const found = await findProject(parts[2]); data = { project: found, issues: (await store.snapshot()).issues.filter(i => i.projectId === found.id) };
         } else if (parts.length === 3 && method === 'PATCH') {
           const body = await readBody(req); data = await store.updateProject(parts[2], pick<ProjectPatch>(body, PROJECT_FIELDS), expected(req, body));
+        } else if (parts.length === 3 && method === 'DELETE') {
+          const force = /^(1|true|yes)$/i.test(url.searchParams.get('force') ?? '');
+          const result = await store.deleteProject(parts[2], force);
+          data = { deleted: true, project: result.project.title, issues: result.issues, folder: result.folder };
         } else if (parts.length === 4 && parts[3] === 'attachments' && method === 'POST') {
           const found = await findProject(parts[2]); data = await attach(found.id, await readBody(req)); status = 201;
         } else throw new HttpError(404, '项目接口不存在。', 'NOT_FOUND');

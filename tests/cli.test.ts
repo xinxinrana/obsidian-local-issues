@@ -123,6 +123,16 @@ test('CLI gh-style lifecycle, JSON selection, stdin, files, attachments and shar
     assert.match(limitNote.stdout, /已达 --limit 1/);
     const allClosed = await run(['issue', 'list', '-P', other.id]);
     assert.match(allClosed.stdout, /当前只看 open/, 'all-closed projects explain the empty open filter');
+    const disposable = await json(['project', 'create', '-t', '待删项目']);
+    const deletedProject = await run(['project', 'delete', disposable.id]); assert.equal(deletedProject.code, 0, deletedProject.stderr);
+    assert.match(deletedProject.stdout, /已删除项目「待删项目」/);
+    assert.equal((await run(['project', 'view', disposable.id])).code, 1, 'the project is gone');
+    const busyProject = await json(['project', 'create', '-t', '带议题项目']);
+    await json(['issue', 'create', '-P', busyProject.id, '-t', '留在项目里的议题']);
+    const refusedDelete = await run(['project', 'delete', busyProject.id]);
+    assert.equal(refusedDelete.code, 1); assert.match(refusedDelete.stderr, /还有 1 条议题/, 'a non-empty project needs --force');
+    const forcedDelete = await run(['project', 'delete', busyProject.id, '--force']); assert.equal(forcedDelete.code, 0, forcedDelete.stderr);
+    assert.match(forcedDelete.stdout, /及其 1 条议题/);
     const projectsOut = await run(['api', '/api/projects']);
     assert.equal(projectsOut.code, 0, projectsOut.stderr);
     assert.doesNotMatch(projectsOut.stdout, /#undefined/);

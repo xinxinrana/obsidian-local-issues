@@ -146,6 +146,18 @@ export class Store implements IssueStore {
       await this.adapter.write(next.path, raw, previousRaw); return { ...next, revision: revision(raw) };
     });
   }
+  /** Deleting a project takes its issues and attachments with it, so a non-empty project needs an explicit force. */
+  async deleteProject(ref: string, force = false): Promise<{ project: Project; issues: number; folder: string }> {
+    return this.mutate(async () => {
+      const snap = await this.snapshot(); const project = this.pickProject(snap, ref);
+      const issues = snap.issues.filter(i => i.projectId === project.id);
+      if (issues.length && !force) throw new Error(`项目里还有 ${issues.length} 条议题，删除会一并移除；确认后用 --force，或先归档（project edit --state archived）。`);
+      const folder = project.path.slice(0, project.path.lastIndexOf('/'));
+      if (!folder.startsWith(`${this.root}/`)) throw new Error(`项目目录不在 ${this.root} 下，已拒绝删除：${folder}`);
+      await this.adapter.removeFolder(folder);
+      return { project, issues: issues.length, folder };
+    });
+  }
   private async issueFields(base: Issue, patch: IssueInput | IssuePatch, snap: Snapshot): Promise<Issue> {
     const i = { ...base };
     if (patch.title !== undefined) i.title = title(patch.title);

@@ -44,6 +44,16 @@ test('API loopback Host, browser rejection and legacy target routes', async () =
       const req = httpRequest(`${f.url}/api/projects`, { headers: { Host: 'evil.test' } }, res => { res.resume(); resolve(res.statusCode!); }); req.on('error', reject); req.end();
     });
     assert.equal(invalidHost, 403);
+    const doomed = await f.store.createProject({ title: '待删除项目' });
+    await f.store.createIssue(doomed.id, { title: '里面还有议题' });
+    const refused = await f.request(`/api/projects/${doomed.id}`, 'DELETE');
+    assert.equal(refused.status, 400, 'a non-empty project needs force');
+    assert.match(refused.error!.message, /还有 1 条议题/);
+    assert.equal((await f.request(`/api/projects/${doomed.id}`, 'GET')).status, 200, 'the refused delete keeps the project');
+    const forced = await f.request(`/api/projects/${doomed.id}?force=1`, 'DELETE');
+    assert.equal(forced.status, 200);
+    assert.equal(forced.data.deleted, true); assert.equal(forced.data.issues, 1);
+    assert.equal((await f.request(`/api/projects/${doomed.id}`, 'GET')).status, 404, 'the project is gone afterwards');
     assert.equal((await f.request('/api/projects', 'GET', undefined, { Origin: 'http://evil.test' })).status, 403);
     const project = await f.store.createProject({ title: 'Only project', description: 'PRIVATE PROJECT DESCRIPTION' });
     const one = await f.store.createIssue(project.id, { title: 'Shared' });

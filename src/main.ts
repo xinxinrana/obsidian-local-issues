@@ -115,6 +115,11 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
           await vault.create(path, content);
         }
       },
+      removeFolder: async path => {
+        path = safe(path);
+        const folder = vault.getAbstractFileByPath(path);
+        if (folder) await vault.trash(folder, vault.adapter instanceof FileSystemAdapter);
+      },
       writeBinary: async (path, data) => {
         path = safe(path); await folders(path);
         if (await vault.adapter.exists(path)) throw new Error('附件已存在');

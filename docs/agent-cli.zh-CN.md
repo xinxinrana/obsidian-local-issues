@@ -48,6 +48,16 @@ local-issues issue close '<议题链接>' --reason completed
 local-issues issue reopen '<议题链接>'
 ```
 
+项目和议题一样有创建与删除入口：
+
+```sh
+local-issues project create -t 新项目 -b 说明
+local-issues project delete '<项目>'            # 空项目直接删除
+local-issues project delete '<项目>' --force    # 项目里还有议题时必须显式 --force
+```
+
+删除会连项目目录（议题、评论时间线、附件）一起移入系统废纸篓，可以找回；议题本身仍然不提供删除。`project edit` 只改 `project.md` 里的标题，目录名是创建时固定的，以 `id` 为准。
+
 `--json number,title,body,comments,revision` 选择字段；`--comments` 显示评论与状态时间线；`--body-file -` 从标准输入读取正文。读取 revision 后使用 `--if-match` 可检测并发覆盖。
 
 服务仅监听本机，拒绝浏览器跨域请求。链接本身不授予额外权限；本机 CLI 可操作当前库。旧分享链接继续兼容，但不再需要其中的 key。Obsidian 双链用于笔记关联，资源链接用于跨工具定位。

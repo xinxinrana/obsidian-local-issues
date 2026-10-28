@@ -55,7 +55,7 @@ var HELP = `Local Issues \xB7 Obsidian \u672C\u5730\u9879\u76EE\u4E0E Issues
   view <\u8BED\u4E49\u5316URL>
   repo view [\u4ED3\u5E93URL] | link
   skill [--dir <\u76EE\u5F55>]               \u8F93\u51FA SKILL.md\uFF0C\u6216\u5199\u5230 <\u76EE\u5F55>/local-issues/SKILL.md
-  project list | view <\u9879\u76EE> | create | edit <\u9879\u76EE> | share <\u9879\u76EE>
+  project list | view <\u9879\u76EE> | create | edit <\u9879\u76EE> | delete <\u9879\u76EE> | share <\u9879\u76EE>
   issue list | view <\u7F16\u53F7/\u53CC\u94FE/ID/\u5206\u4EABURL> | create | edit <\u5F15\u7528>
   issue comment <\u5F15\u7528> | close <\u5F15\u7528> | reopen <\u5F15\u7528>
   issue attach <\u5F15\u7528> <\u6587\u4EF6> | share <\u5F15\u7528>
@@ -128,6 +128,7 @@ var COMMAND_HELP = {
   view <\u9879\u76EE>
   create -t \u6807\u9898 [-b \u63CF\u8FF0]
   edit <\u9879\u76EE> [-t \u6807\u9898] [-b \u63CF\u8FF0] [--state \u72B6\u6001]
+  delete <\u9879\u76EE> [--force]   \u8FDE\u76EE\u5F55\u4E00\u8D77\u5220\u9664\uFF08\u8FDB\u5E9F\u7EB8\u7BD3\uFF0C\u53EF\u6062\u590D\uFF09\uFF1B\u9879\u76EE\u91CC\u8FD8\u6709\u8BAE\u9898\u65F6\u5FC5\u987B\u52A0 --force
   share <\u9879\u76EE>`,
   comment: `\u7528\u6CD5: local-issues comment edit <\u8BC4\u8BBAID> -b \u5185\u5BB9 | comment delete <\u8BC4\u8BBAID>
 
@@ -141,9 +142,9 @@ var COMMAND_HELP = {
   share: `\u7528\u6CD5: local-issues share view <\u5206\u4EABURL> | edit | comment | comment-edit <\u8BC4\u8BBAID>`
 };
 var aliases = { c: "comments", P: "project", t: "title", b: "body", F: "body-file", l: "label", a: "assignee", s: "state", S: "search", L: "limit", h: "help", X: "method", f: "field", H: "header" };
-var booleans = /* @__PURE__ */ new Set(["help", "web", "comment", "comments", "version"]);
+var booleans = /* @__PURE__ */ new Set(["help", "web", "comment", "comments", "version", "force"]);
 var multiples = /* @__PURE__ */ new Set(["label", "assignee", "depends-on", "add-label", "remove-label", "field", "header"]);
-var allowed = /* @__PURE__ */ new Set(["project", "title", "body", "body-file", "state", "status", "label", "assignee", "milestone", "parent", "depends-on", "due-date", "author", "search", "limit", "json", "web", "vault", "url", "if-match", "help", "method", "field", "header", "comment", "add-label", "remove-label", "description", "comments", "reason", "dir", "version"]);
+var allowed = /* @__PURE__ */ new Set(["project", "title", "body", "body-file", "state", "status", "label", "assignee", "milestone", "parent", "depends-on", "due-date", "author", "search", "limit", "json", "web", "vault", "url", "if-match", "help", "method", "field", "header", "comment", "add-label", "remove-label", "description", "comments", "reason", "dir", "version", "force"]);
 function parse(argv) {
   const args = [], flags = {};
   for (let i = 0; i < argv.length; i++) {
@@ -421,6 +422,14 @@ async function main() {
       if (val(flags, "due-date") !== void 0) value.dueDate = val(flags, "due-date");
       if (action === "create") required(value.title, "\u6807\u9898\uFF08--title\uFF09");
       data = await api.request(action === "create" ? "/api/projects" : resourceUrl && resource ? resourceUrl.toString() : `/api/projects/${encodeURIComponent(required(ref, "\u9879\u76EE"))}`, action === "create" ? "POST" : "PATCH", value);
+    } else if (action === "delete") {
+      const target = resource && resourceUrl && "project" in resource && resource.project || required(ref, "\u9879\u76EE");
+      const result = await api.request(`/api/projects/${encodeURIComponent(target)}${flags.force !== void 0 ? "?force=1" : ""}`, "DELETE");
+      if (flags.json !== void 0) data = result;
+      else {
+        console.log(`\u5DF2\u5220\u9664\u9879\u76EE\u300C${result.project}\u300D${result.issues ? `\u53CA\u5176 ${result.issues} \u6761\u8BAE\u9898` : ""}\uFF0C\u76EE\u5F55\u5DF2\u79FB\u5165\u5E9F\u7EB8\u7BD3\uFF1A${result.folder}`);
+        return;
+      }
     } else if (action === "share") data = resourceUrl && resource ? { url: resourceUrl.toString() } : await api.request(`/api/links?ref=${encodeURIComponent(required(ref, "\u9879\u76EE"))}`);
     else throw new Error("\u672A\u77E5\u9879\u76EE\u547D\u4EE4\u3002\u8FD0\u884C local-issues --help \u67E5\u770B\u7528\u6CD5\u3002");
   } else if (command === "issue") {

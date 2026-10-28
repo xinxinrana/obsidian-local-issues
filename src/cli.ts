@@ -11,7 +11,7 @@ const HELP = `Local Issues · Obsidian 本地项目与 Issues
   view <语义化URL>
   repo view [仓库URL] | link
   skill [--dir <目录>]               输出 SKILL.md，或写到 <目录>/local-issues/SKILL.md
-  project list | view <项目> | create | edit <项目> | share <项目>
+  project list | view <项目> | create | edit <项目> | delete <项目> | share <项目>
   issue list | view <编号/双链/ID/分享URL> | create | edit <引用>
   issue comment <引用> | close <引用> | reopen <引用>
   issue attach <引用> <文件> | share <引用>
@@ -85,6 +85,7 @@ const COMMAND_HELP: Record<string, string> = {
   view <项目>
   create -t 标题 [-b 描述]
   edit <项目> [-t 标题] [-b 描述] [--state 状态]
+  delete <项目> [--force]   连目录一起删除（进废纸篓，可恢复）；项目里还有议题时必须加 --force
   share <项目>`,
   comment: `用法: local-issues comment edit <评论ID> -b 内容 | comment delete <评论ID>
 
@@ -98,9 +99,9 @@ const COMMAND_HELP: Record<string, string> = {
   share: `用法: local-issues share view <分享URL> | edit | comment | comment-edit <评论ID>`,
 };
 const aliases: Record<string, string> = { c: 'comments', P: 'project', t: 'title', b: 'body', F: 'body-file', l: 'label', a: 'assignee', s: 'state', S: 'search', L: 'limit', h: 'help', X: 'method', f: 'field', H: 'header' };
-const booleans = new Set(['help', 'web', 'comment', 'comments', 'version']);
+const booleans = new Set(['help', 'web', 'comment', 'comments', 'version', 'force']);
 const multiples = new Set(['label', 'assignee', 'depends-on', 'add-label', 'remove-label', 'field', 'header']);
-const allowed = new Set(['project','title','body','body-file','state','status','label','assignee','milestone','parent','depends-on','due-date','author','search','limit','json','web','vault','url','if-match','help','method','field','header','comment','add-label','remove-label','description','comments','reason','dir','version']);
+const allowed = new Set(['project','title','body','body-file','state','status','label','assignee','milestone','parent','depends-on','due-date','author','search','limit','json','web','vault','url','if-match','help','method','field','header','comment','add-label','remove-label','description','comments','reason','dir','version','force']);
 function parse(argv: string[]): { args: string[]; flags: Flags } {
   const args: string[] = [], flags: Flags = {};
   for (let i = 0; i < argv.length; i++) {
@@ -293,6 +294,11 @@ async function main(): Promise<void> {
       if (val(flags, 'due-date') !== undefined) value.dueDate = val(flags, 'due-date');
       if (action === 'create') required(value.title as string, '标题（--title）');
       data = await api.request(action === 'create' ? '/api/projects' : resourceUrl && resource ? resourceUrl.toString() : `/api/projects/${encodeURIComponent(required(ref, '项目'))}`, action === 'create' ? 'POST' : 'PATCH', value);
+    } else if (action === 'delete') {
+      const target = (resource && resourceUrl && 'project' in resource && resource.project) || required(ref, '项目');
+      const result = await api.request(`/api/projects/${encodeURIComponent(target)}${flags.force !== undefined ? '?force=1' : ''}`, 'DELETE');
+      if (flags.json !== undefined) data = result;
+      else { console.log(`已删除项目「${result.project}」${result.issues ? `及其 ${result.issues} 条议题` : ''}，目录已移入废纸篓：${result.folder}`); return; }
     } else if (action === 'share') data = resourceUrl && resource ? { url: resourceUrl.toString() } : await api.request(`/api/links?ref=${encodeURIComponent(required(ref, '项目'))}`);
     else throw new Error('未知项目命令。运行 local-issues --help 查看用法。');
   } else if (command === 'issue') {

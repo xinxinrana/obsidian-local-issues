@@ -22,6 +22,7 @@ export async function fixture() {
     async write(path, text) { await mkdir(dirname(join(vault, path)), { recursive: true }); await writeFile(join(vault, path), text); },
     async writeBinary(path, data) { await mkdir(dirname(join(vault, path)), { recursive: true }); await writeFile(join(vault, path), data); },
     async exists(path) { try { await access(join(vault, path)); return true; } catch { return false; } },
+    async removeFolder(path) { await rm(join(vault, path), { recursive: true, force: true }); },
   };
   const store = new Store(adapter);
   const shares: Record<string, Share> = {};
