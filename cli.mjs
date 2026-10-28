@@ -453,7 +453,7 @@ async function main() {
           return;
         }
         if (data.length >= limit) note = `\uFF08\u5DF2\u8FBE --limit ${limit}\uFF0C\u53EF\u80FD\u8FD8\u6709\u66F4\u591A\uFF1A\u7528 --limit ${limit * 4} \u6216 --state all \u67E5\u770B\uFF09`;
-        if (!project && !resourceUrl) note = `\u5F53\u524D\u8DE8\u9879\u76EE\u5217\u51FA\uFF0C\u7B2C\u4E8C\u5217\u4E4B\u540E\u7684\u300C\u9879\u76EE\u300D\u5217\u7528\u4E8E\u533A\u5206\u540C\u53F7\u8BAE\u9898\uFF1B\u64CD\u4F5C\u65F6\u8BF7\u5E26 -P \u6216\u76F4\u63A5\u4F20\u94FE\u63A5\u3002${note ? `
+        if (!project && !resourceUrl && data.some((issue) => issue.project)) note = `\u5F53\u524D\u8DE8\u9879\u76EE\u5217\u51FA\uFF0C\u7B2C\u4E8C\u5217\u4E4B\u540E\u7684\u300C\u9879\u76EE\u300D\u5217\u7528\u4E8E\u533A\u5206\u540C\u53F7\u8BAE\u9898\uFF1B\u64CD\u4F5C\u65F6\u8BF7\u5E26 -P \u6216\u76F4\u63A5\u4F20\u94FE\u63A5\u3002${note ? `
 ${note}` : ""}`;
       }
     } else if (action === "view") data = await api.request(issuePath(required(ref, "Issue \u5F15\u7528")));

@@ -318,7 +318,8 @@ async function main(): Promise<void> {
         const limit = Number(query.get('limit') ?? 30);
         if (!data.length && state === 'open' && flags.json === undefined) { console.log('没有匹配的条目：当前只看 open，加 --state all 查看全部。'); return; }
         if (data.length >= limit) note = `（已达 --limit ${limit}，可能还有更多：用 --limit ${limit * 4} 或 --state all 查看）`;
-        if (!project && !resourceUrl) note = `当前跨项目列出，第二列之后的「项目」列用于区分同号议题；操作时请带 -P 或直接传链接。${note ? `\n${note}` : ''}`;
+        // Only promise the column when the server echoed project names (an older running API cannot).
+        if (!project && !resourceUrl && data.some((issue: { project?: string }) => issue.project)) note = `当前跨项目列出，第二列之后的「项目」列用于区分同号议题；操作时请带 -P 或直接传链接。${note ? `\n${note}` : ''}`;
       }
     } else if (action === 'view') data = await api.request(issuePath(required(ref, 'Issue 引用')));
     else if (action === 'create') data = await api.request('/api/issues', 'POST', { ...issuePatch(flags), title: required(val(flags, 'title'), '标题（--title）'), project: required(project, '项目（--project）'), author: val(flags, 'author') ?? 'Agent' });
