@@ -30,6 +30,8 @@ export class IssuesView extends ItemView {
   private creating?: { projectId: string; defaults: Partial<IssueInput> };
   private activeEdit?: { element: HTMLElement; label: string; dirty: () => boolean; discard: () => void };
   private discardPrompt?: Modal;
+  private deletePrompt?: Modal;
+  private submissionNotice?: Notice;
   private submittingComment = false;
   private data: Snapshot = { projects: [], issues: [], timeline: [], warnings: [] };
   private query = '';
@@ -52,7 +54,7 @@ export class IssuesView extends ItemView {
   getDisplayText() { return 'Local Issues'; }
   getIcon() { return 'list-todo'; }
   async onOpen() { this.renderScope.load(); await this.refresh(); }
-  async onClose() { this.discardPrompt?.close(); this.stopEditing(); this.renderScope.unload(); }
+  async onClose() { this.deletePrompt?.close(); this.submissionNotice?.hide(); this.discardPrompt?.close(); this.stopEditing(); this.renderScope.unload(); }
   getState() { return { projectId: this.projectId, issueId: this.issueId }; }
   private get editingInline() {
     if (this.activeEdit && !this.contentEl.contains(this.activeEdit.element)) this.stopEditing(true);
@@ -77,9 +79,16 @@ export class IssuesView extends ItemView {
     this.contentEl.querySelector('.li-editing-location')?.remove();
     if (discard) edit?.discard();
   }
-  private afterEditing(run: () => void | Promise<unknown>): Promise<void> {
-    if (this.discardPrompt) return Promise.resolve();
-    if (this.submittingComment) return Promise.resolve();
+  private afterEditing(run: () => void | Promise<unknown>, allowDuringSubmission = false): Promise<void> {
+    if (this.discardPrompt?.modalEl.isConnected) {
+      this.discardPrompt.modalEl.querySelector<HTMLElement>('button')?.focus();
+      return Promise.resolve();
+    }
+    this.discardPrompt = undefined;
+    if (this.submittingComment && !allowDuringSubmission) {
+      this.submissionNotice ??= new Notice('评论正在发表，请稍候再操作。', 0);
+      return Promise.resolve();
+    }
     if (!this.editingInline || !this.activeEdit!.dirty()) {
       this.stopEditing(true);
       return (async () => { await run(); })();
@@ -252,7 +261,7 @@ export class IssuesView extends ItemView {
     const children = this.data.issues.filter(i => i.parent === issue.id); if (children.length) { const section = el(main, 'section', 'li-relations'); el(section, 'h3', '', `子议题 · ${children.filter(i => i.status === 'closed').length}/${children.length}`); for (const child of children) { const row = el(section, 'div', 'li-relation'); pill(row, child.status, child.closeReason); action(row, `#${child.number} ${child.title}`, () => safe(() => this.navigate(child.projectId, child.id)), 'li-subtle'); } }
     action(main, '+ 添加子议题', () => this.issueModal(project, undefined, { parent: issue.id }), 'li-subtle');
     const timeline = el(main, 'div', 'li-timeline'); const entries = this.data.timeline.filter(e => e.issueId === issue.id).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    for (const entry of entries) { if (entry.kind === 'event') { const event = el(timeline, 'div', 'li-event'); pill(event, entry.to || 'open'); el(event, 'span', '', `${entry.author} ${entry.body}`); el(event, 'span', 'li-muted', date(entry.createdAt)); } else { const comment = el(timeline, 'article', 'li-comment'); const head = el(comment, 'div', 'li-comment-header'); el(head, 'strong', '', entry.author); el(head, 'span', 'li-muted', `${date(entry.createdAt)}${entry.updatedAt !== entry.createdAt ? ' · 已编辑' : ''}`); el(head, 'div', 'li-spacer'); const content = el(comment, 'div', 'li-description-content'); const edit = action(head, '编辑', () => safe(() => this.afterEditing(() => { edit.hidden = true; content.replaceChildren(); const text = this.editor(content, entry.body, issue.id, entry.path); const buttons = text.actions; this.startEditing(text.element, `评论 · ${entry.author} · ${date(entry.createdAt)} · ${entry.body.replace(/\s+/g, ' ').slice(0, 40)}`, () => text.value !== entry.body || text.uploading, () => { text.destroy(); content.replaceChildren(); this.markdown(content, entry.body, entry.path); edit.hidden = false; }); action(buttons, '取消', () => { this.stopEditing(true); if (this.pending) safe(() => this.draw()); }); const save = action(buttons, '保存', () => safe(async () => { if (!text.value.trim()) throw new Error('评论不能为空'); if (text.uploading) throw new Error('附件正在保存，请稍后保存'); save.disabled = true; try { await this.host.store.editComment(entry.id, text.value, entry.revision ?? entry.updatedAt); this.stopEditing(); await this.draw(); } finally { save.disabled = false; } }), 'mod-cta'); text.focus(); })), 'li-subtle'); action(head, '笔记', () => safe(() => this.host.openNote(entry.path)), 'li-subtle'); action(head, '删除', () => this.deleteComment(comment, entry), 'li-subtle li-delete-comment'); this.markdown(content, entry.body, entry.path); } }
+    for (const entry of entries) { if (entry.kind === 'event') { const event = el(timeline, 'div', 'li-event'); pill(event, entry.to || 'open'); el(event, 'span', '', `${entry.author} ${entry.body}`); el(event, 'span', 'li-muted', date(entry.createdAt)); } else { const comment = el(timeline, 'article', 'li-comment'); comment.dataset.commentId = entry.id; const head = el(comment, 'div', 'li-comment-header'); el(head, 'strong', '', entry.author); el(head, 'span', 'li-muted', `${date(entry.createdAt)}${entry.updatedAt !== entry.createdAt ? ' · 已编辑' : ''}`); el(head, 'div', 'li-spacer'); const content = el(comment, 'div', 'li-description-content'); const edit = action(head, '编辑', () => safe(() => this.afterEditing(() => { edit.hidden = true; content.replaceChildren(); const text = this.editor(content, entry.body, issue.id, entry.path); const buttons = text.actions; this.startEditing(text.element, `评论 · ${entry.author} · ${date(entry.createdAt)} · ${entry.body.replace(/\s+/g, ' ').slice(0, 40)}`, () => text.value !== entry.body || text.uploading, () => { text.destroy(); content.replaceChildren(); this.markdown(content, entry.body, entry.path); edit.hidden = false; }); action(buttons, '取消', () => { this.stopEditing(true); if (this.pending) safe(() => this.draw()); }); const save = action(buttons, '保存', () => safe(async () => { if (!text.value.trim()) throw new Error('评论不能为空'); if (text.uploading) throw new Error('附件正在保存，请稍后保存'); save.disabled = true; try { await this.host.store.editComment(entry.id, text.value, entry.revision ?? entry.updatedAt); this.stopEditing(); await this.draw(); } finally { save.disabled = false; } }), 'mod-cta'); text.focus(); })), 'li-subtle'); action(head, '笔记', () => safe(() => this.host.openNote(entry.path)), 'li-subtle'); action(head, '删除', () => this.deleteComment(comment, entry), 'li-subtle li-delete-comment'); this.markdown(content, entry.body, entry.path); } }
     const composer = el(main, 'section', 'li-composer'); el(composer, 'h3', '', '发表评论'); const editor = this.editor(composer, this.drafts.get(issue.id) || '', issue.id, issue.path, value => this.drafts.set(issue.id, value)); const status = el(composer, 'div', 'li-composer-status'); status.setAttribute('role', 'status'); const footer = editor.actions;
     let closeReason: CloseReason = 'completed'; if (issue.status !== 'closed') select(footer, Object.entries(CLOSE_REASON_NAMES) as [string, string][], closeReason, value => { closeReason = value as CloseReason; });
     const close = action(footer, issue.status === 'closed' ? '重新打开 Issue' : '关闭 Issue', () => safe(() => this.afterEditing(async () => { close.disabled = true; try { await this.host.store.updateIssue(issue.id, { status: issue.status === 'closed' ? 'open' : 'closed', ...(issue.status !== 'closed' ? { closeReason } : {}), actor: this.host.author }, issue.revision ?? issue.updatedAt); await this.draw(); } finally { close.disabled = false; } })));
@@ -267,7 +276,7 @@ export class IssuesView extends ItemView {
         editor.clear(); this.drafts.delete(issue.id); this.submittingComment = false;
         await this.draw(); new Notice('评论已发表');
       } catch (error) { status.textContent = `发表失败：${error instanceof Error ? error.message : String(error)}`; throw error; }
-      finally { this.submittingComment = false; submit.disabled = false; submit.textContent = '发表评论'; }
+      finally { this.submittingComment = false; this.submissionNotice?.hide(); this.submissionNotice = undefined; submit.disabled = false; submit.textContent = '发表评论'; }
     })), 'mod-cta');
     el(sidebar, 'h3', '', '属性'); const stateField = this.field(sidebar, '状态'); select(stateField, stateOptions, stateValue(issue), value => { const stateSelect = stateField.querySelector('select')!; stateSelect.value = stateValue(issue); safe(() => this.afterEditing(async () => { await this.host.store.updateIssue(issue.id, { ...statePatch(value), actor: this.host.author }, issue.revision ?? issue.updatedAt); await this.draw(); })); });
     for (const [name, value] of [['标签', issue.labels.join('、')], ['里程碑', issue.milestone], ['负责人', issue.assignees.join('、')], ['截止日期', issue.dueDate]]) { const field = this.field(sidebar, name); el(field, 'div', 'li-muted', value || '未设置'); }
@@ -277,16 +286,36 @@ export class IssuesView extends ItemView {
   }
   private deleteComment(parent: HTMLElement, entry: TimelineEntry) {
     safe(() => this.afterEditing(() => {
-      const confirmation = el(parent, 'div', 'li-delete-confirmation'); confirmation.setAttribute('role', 'alert');
-      el(confirmation, 'span', '', '删除这条评论？');
-      this.startEditing(confirmation, `删除评论 · ${entry.author} · ${date(entry.createdAt)}`, () => false, () => confirmation.remove());
-      const cancel = action(confirmation, '取消', () => { this.stopEditing(true); if (this.pending) safe(() => this.draw()); });
-      const confirm = action(confirmation, '确认删除', () => safe(async () => {
-        if (confirm.disabled) return; confirm.disabled = true; cancel.disabled = true;
-        try { await this.host.store.deleteComment(entry.id, entry.revision ?? entry.updatedAt); this.stopEditing(); await this.draw(); new Notice('评论已删除'); }
-        finally { confirm.disabled = false; cancel.disabled = false; }
-      }));
-    }));
+      if (this.deletePrompt?.modalEl.isConnected) {
+        this.deletePrompt.modalEl.querySelector<HTMLElement>('button')?.focus();
+        return;
+      }
+      const modal = this.deletePrompt = this.modal('删除这条评论？');
+      modal.modalEl.addClass('li-delete-dialog');
+      modal.onClose = () => { if (this.deletePrompt === modal) this.deletePrompt = undefined; };
+      el(modal.contentEl, 'p', 'li-muted', `${entry.author} · ${date(entry.createdAt)}`);
+      el(modal.contentEl, 'p', 'li-delete-excerpt', entry.body.replace(/\s+/g, ' ').slice(0, 180));
+      const status = el(modal.contentEl, 'p', 'li-delete-status'); status.setAttribute('role', 'status');
+      const buttons = el(modal.modalEl, 'div', 'li-modal-actions');
+      const cancel = action(buttons, '取消', () => modal.close());
+      const confirm = action(buttons, '确认删除', () => safe(async () => {
+        if (confirm.disabled) return;
+        confirm.disabled = true; cancel.disabled = true; confirm.textContent = '正在删除…'; status.removeClass('is-error'); status.textContent = '正在删除评论…';
+        try {
+          await this.host.store.deleteComment(entry.id, entry.revision ?? entry.updatedAt);
+        } catch (error) {
+          status.addClass('is-error'); status.textContent = `删除失败：${error instanceof Error ? error.message : String(error)}`;
+          if (!modal.modalEl.isConnected) new Notice(status.textContent, 0);
+          confirm.disabled = false; cancel.disabled = false; confirm.textContent = '重试删除';
+          return;
+        }
+        parent.remove();
+        for (const card of this.contentEl.querySelectorAll<HTMLElement>('.li-comment')) if (card.dataset.commentId === entry.id) card.remove();
+        modal.close(); new Notice('评论已删除');
+        await this.draw();
+      }), 'mod-warning');
+      modal.open(); cancel.focus();
+    }, true));
   }
   private field(parent: HTMLElement, label: string) { const field = el(parent, 'div', 'li-field'); el(field, 'label', '', label); return field; }
   private projectModal(project?: Project) {

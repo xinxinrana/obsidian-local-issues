@@ -137,7 +137,9 @@
 .local-issues .li-editor-preview { padding: 12px 16px; min-height: 4.8em; max-height: 55dvh; overflow-y: auto; overflow-wrap: anywhere; }
 .local-issues .li-editor-preview img { max-width: min(100%, 480px); max-height: 280px; width: auto; height: auto; object-fit: contain; }
 .local-issues .li-editor-preview .image-embed { max-width: 100%; }
-.local-issues .li-delete-confirmation { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 14px; border-top: 1px solid var(--li-border); }
+.li-delete-dialog .li-delete-excerpt { margin-top: 12px; overflow-wrap: anywhere; }
+.li-delete-dialog .li-delete-status:not(:empty) { margin-top: 12px; color: var(--text-muted); }
+.li-delete-dialog .li-delete-status.is-error { color: var(--text-error); }
 .local-issues .li-delete-comment { color: var(--text-error); }
 .local-issues .li-composer-status:not(:empty) { margin-top: 10px; color: var(--text-muted); }
 .local-issues .li-editor-footer { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 0 16px 12px; }

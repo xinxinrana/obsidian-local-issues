@@ -64,7 +64,7 @@ class Menu {
   showAtPosition(position) { this.shown = true; this.position = position; }
   select(title) { const item = this.items.find(i => i.title === title); if (!item || item.disabled || !item.callback) throw new Error(`菜单项不可用：${title}`); return item.callback(); }
 }
-class Notice { constructor(message) { notices.push(message); } }
+class Notice { constructor(message) { notices.push(message); } hide() {} }
 const MarkdownRenderer = { async render(app, body, el, sourcePath, component) { el.textContent = body; el.dataset.sourcePath = sourcePath; } };
 class Plugin extends Component {
   constructor(app, manifest) { super(); this.app = app; this.manifest = manifest; this.commands = []; this.views = new Map(); this.protocols = new Map(); }
