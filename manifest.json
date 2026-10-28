@@ -1,7 +1,7 @@
 {
   "id": "local-issues",
   "name": "Local Issues",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "minAppVersion": "1.14.4",
   "description": "Manage local Markdown projects, issues, boards, comments and attachments, with an optional API and agent CLI.",
   "author": "Evan",

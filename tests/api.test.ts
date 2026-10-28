@@ -38,7 +38,7 @@ test('API loopback Host, browser rejection and legacy target routes', async () =
   const f = await fixture();
   try {
     const health = await fetch(`${f.url}/api/health`); assert.equal(health.status, 200);
-    assert.deepEqual(await health.json(), { ok: true, data: { name: 'Local Issues', version: '0.2.2' } });
+    assert.deepEqual(await health.json(), { ok: true, data: { name: 'Local Issues', version: '0.2.3' } });
     assert.equal((await fetch(`${f.url}/api/projects`)).status, 200);
     const invalidHost = await new Promise<number>((resolve, reject) => {
       const req = httpRequest(`${f.url}/api/projects`, { headers: { Host: 'evil.test' } }, res => { res.resume(); resolve(res.statusCode!); }); req.on('error', reject); req.end();
