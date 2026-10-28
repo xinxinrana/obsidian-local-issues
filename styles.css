@@ -1,4 +1,6 @@
 /* Workspace chrome owns the pane; the inner shell owns content spacing. */
+body:has(.li-no-tooltips:hover) .tooltip,
+.li-no-tooltips .tooltip { display: none !important; }
 .workspace-leaf-content[data-type="local-issues-view"] > .view-content.local-issues {
   padding: 0; min-height: 0; height: 100%; overflow: auto; container: local-issues / inline-size;
 }

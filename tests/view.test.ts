@@ -52,7 +52,16 @@ test('real view supports project → issue → Markdown comments, pasted and dro
   const uploading = (node: any) => node.closest('.li-editor').dataset.uploading;
   try {
     await view.onOpen(); assert.match(view.contentEl.textContent, /把想法变成项目/);
+    const hint = document.createElement('button'); hint.title = '重复提示'; hint.setAttribute('aria-label', '可访问名称');
+    const hintIcon = document.createElement('span'); hint.append(hintIcon); view.contentEl.append(hint);
+    let hovered = false; hint.addEventListener('mouseover', () => { hovered = true; });
+    hintIcon.dispatchEvent(new dom.window.MouseEvent('mouseover', { bubbles: true }));
+    assert.equal(hint.hasAttribute('title'), false); assert.equal(hint.getAttribute('aria-label'), '可访问名称'); assert.ok(hovered);
+    hint.title = '键盘提示'; hint.dispatchEvent(new dom.window.Event('focusin', { bubbles: true })); assert.equal(hint.hasAttribute('title'), false); hint.remove();
+    const outside = document.createElement('button'); outside.title = '其他页面提示'; document.body.append(outside);
+    outside.dispatchEvent(new dom.window.MouseEvent('mouseover', { bubbles: true })); assert.equal(outside.title, '其他页面提示'); outside.remove();
     click('创建第一个项目'); let modal = mock.modals.at(-1); assertFooter(modal);
+    assert.ok(modal.modalEl.classList.contains('li-no-tooltips'));
     fill(modal.contentEl.querySelector('input[placeholder="项目名称"]'), '界面项目');
     fill(modal.contentEl.querySelector('textarea'), '项目正文 [[Reference]]'); click('保存', modal.modalEl);
     await until(async () => (await store.snapshot()).projects.length === 1 && !mock.modals.length && !!view.contentEl.querySelector('input[aria-label="搜索 Issues"]'), '创建项目');

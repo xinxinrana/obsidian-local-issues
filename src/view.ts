@@ -1,5 +1,6 @@
 import { Component, ItemView, MarkdownRenderer, Modal, Notice, Menu, setIcon, WorkspaceLeaf } from 'obsidian';
 import { createLiveMarkdown } from './live-markdown';
+import { suppressTooltips } from './tooltips';
 import { ISSUE_STATUSES, STATUS_NAMES, CLOSE_REASON_NAMES, issueLink, CloseReason, Issue, IssueInput, IssuePatch, IssueStore, Project, ProjectStatus, Snapshot, TimelineEntry } from './types';
 
 export const VIEW_TYPE = 'local-issues-view';
@@ -55,7 +56,7 @@ export class IssuesView extends ItemView {
   getViewType() { return VIEW_TYPE; }
   getDisplayText() { return 'Local Issues'; }
   getIcon() { return 'list-todo'; }
-  async onOpen() { this.renderScope.load(); await this.refresh(); }
+  async onOpen() { suppressTooltips(this.contentEl); this.renderScope.load(); await this.refresh(); }
   async onClose() { this.deletePrompt?.close(); this.submissionNotice?.hide(); this.discardPrompt?.close(); this.stopEditing(); this.renderScope.unload(); }
   getState() { return { projectId: this.projectId, issueId: this.issueId }; }
   private get editingInline() {
@@ -366,7 +367,7 @@ export class IssuesView extends ItemView {
     else { this.saveButton(modal!, saveIssue); modal!.open(); } title?.focus();
   }
   private textModal(title: string, value: string, save: (value: string) => Promise<void>) { const modal = this.modal(title); const text = input(modal.contentEl, title, value); this.saveButton(modal, async () => { await save(text.value); modal.close(); }); modal.open(); text.focus(); }
-  private modal(title: string) { const modal = new Modal(this.app); modal.modalEl.addClass('li-modal-container'); modal.contentEl.addClass('local-issues', 'li-modal'); modal.titleEl.setText(title); return modal; }
+  private modal(title: string) { const modal = new Modal(this.app); suppressTooltips(modal.modalEl); modal.modalEl.addClass('li-modal-container'); modal.contentEl.addClass('local-issues', 'li-modal'); modal.titleEl.setText(title); return modal; }
   private saveButton(modal: Modal, run: () => Promise<void>) { const buttons = el(modal.modalEl, 'div', 'li-modal-actions'); action(buttons, '取消', () => modal.close()); const save = action(buttons, '保存', () => safe(async () => { save.disabled = true; try { if (modal.contentEl.querySelector('[data-uploading]')) throw new Error('附件正在保存，请稍后保存'); await run(); } finally { save.disabled = false; } }), 'mod-cta'); }
   private editor(parent: HTMLElement, initial: string, ref: string, sourcePath: string, changed?: (body: string) => void) {
     const container = el(parent, 'div', 'li-editor'); const tools = el(container, 'div', 'li-editor-toolbar');
