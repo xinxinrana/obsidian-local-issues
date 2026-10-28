@@ -25,7 +25,7 @@
 
 在 Obsidian 中启用 Local Issues 的本地 API。CLI 需要 Node.js 22 或以上。
 
-插件加载时会把全局命令 `local-issues` 写到 `~/.local/bin`（Windows 为 `local-issues.cmd`），内容是 `node '<插件目录>/cli.mjs' --vault '<笔记库>' "$@"`：命令绑定当前笔记库，端口从插件设置读取，改端口不用重装。该目录不在 PATH 时插件会提示；设置页可「安装命令 / 移除命令」，移除只删本插件写入的文件。也可以从源码目录运行 `npm install -g .`，或用 `node '/路径/cli.mjs' --vault '/笔记库'` 代替 `local-issues`。
+在插件设置点击「安装 CLI」，即可检查 Node.js 22+、补齐当前版本 CLI、安装全局命令并配置用户 PATH。缺失文件从同版本 Release 下载并校验 SHA-256，已有文件直接复用。失败时设置页逐步展示原因与处理办法；Node.js 未找到时才提供下载入口和自定义路径输入。命令绑定当前笔记库，端口从设置读取，改端口无需重装。卸载只处理本安装器管理的命令和 PATH 配置，不会在下次启动插件时重新安装。也可用 `node '/路径/cli.mjs' --vault '/笔记库'` 直接运行。
 
 Agent 侧的用法用一份极简 skill 承载：`local-issues skill` 输出 `SKILL.md`（含 frontmatter），`local-issues skill --dir <目录>` 直接写成 `<目录>/local-issues/SKILL.md`。插件不知道也不需要知道各 agent 的 skills 目录在哪儿，落盘位置由 agent 自己决定；插件设置里的「复制引导语」就是这段交接话术，「复制 Skill」只复制 SKILL.md 正文。
 

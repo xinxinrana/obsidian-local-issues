@@ -1,8 +1,8 @@
-import { App, FileSystemAdapter, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, normalizePath } from 'obsidian';
+import { App, FileSystemAdapter, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, normalizePath, requestUrl } from 'obsidian';
 import { randomBytes } from 'node:crypto';
-import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { delimiter, dirname, join } from 'node:path';
+import { join } from 'node:path';
+import { CliInstaller, CliInstallError, type CliProgress } from './cli-installer';
 import { agentGuide, agentSkill } from './agent-skill';
 import { ResourceRoutes, slug } from './routes';
 import { Store } from './store';
@@ -19,6 +19,7 @@ interface Settings {
   repoSlug?: string;
   projectSlugs?: Record<string, string>;
   shares: Record<string, { ref: string }>;
+  cliNodePath?: string;
 }
 const DEFAULTS: Settings = { root: 'Local Issues', author: '我', apiEnabled: false, port: 27183, shares: {} };
 
@@ -31,6 +32,13 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
   private unloaded = false;
   private apiQueue: Promise<void> = Promise.resolve();
   apiError = '';
+  cliBusy = false;
+  cliInstalled = false;
+  cliProgress: CliProgress[] = [];
+  cliMessage = '';
+  private cliTask?: Promise<string>;
+  private cliStatusVersion = 0;
+  private cliListeners = new Set<() => void>();
   get author(): string { return this.settings.author; }
 
   async onload(): Promise<void> {
@@ -49,8 +57,8 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
     this.addCommand({ id: 'open-projects', name: '打开项目', callback: () => { void this.activate().catch(this.report); } });
     this.addCommand({ id: 'copy-skill', name: '复制 Agent Skill', callback: () => { void this.copySkill(); } });
     this.addCommand({ id: 'copy-guide', name: '复制给 Agent 的引导语（含 skill 安装说明）', callback: () => { void this.copyGuide(); } });
-    this.addCommand({ id: 'install-cli', name: '安装或修复全局命令 local-issues', callback: () => { void this.installCli().catch(this.report); } });
-    this.addCommand({ id: 'remove-cli', name: '移除全局命令 local-issues', callback: () => { void this.removeCli().catch(this.report); } });
+    this.addCommand({ id: 'install-cli', name: '安装或修复 CLI', callback: () => { void this.installCli().catch(this.report); } });
+    this.addCommand({ id: 'remove-cli', name: '卸载 CLI 命令', callback: () => { void this.removeCli().catch(this.report); } });
     this.addCommand({ id: 'open-current-issue', name: '在项目中打开当前 Issue 笔记', checkCallback: checking => {
       const file = this.app.workspace.getActiveFile();
       if (!file || !file.path.startsWith(`${this.settings.root}/`)) return false;
@@ -64,7 +72,6 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
     this.app.workspace.onLayoutReady(() => {
       if (this.unloaded) return;
       void this.restartApi();
-      void this.installCli(true).catch(error => console.error('[Local Issues] 安装命令失败', error));
     });
     for (const event of ['create', 'modify', 'delete', 'rename'] as const) {
       this.registerEvent(this.app.vault.on(event as 'modify', () => this.scheduleRefresh()));
@@ -144,6 +151,7 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
     const tab = new LocalIssuesSettings(this.app, this);
     tab.containerEl = modal.contentEl;
     tab.display();
+    modal.onClose = () => tab.hide();
     modal.open();
   }
 
@@ -170,7 +178,7 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
   private async cliPath(): Promise<string> {
     const adapter = this.app.vault.adapter;
     const relativePath = `${this.manifest.dir ?? `${this.app.vault.configDir}/plugins/local-issues`}/cli.mjs`;
-    if (!await adapter.exists(relativePath)) throw new Error('请先从 GitHub Release 下载独立的 cli.mjs，放入 Local Issues 插件目录，再复制命令。');
+    if (!await adapter.exists(relativePath)) throw new Error('CLI 尚未安装，请在 Local Issues 设置点击「安装 CLI」。');
     const base = adapter instanceof FileSystemAdapter ? adapter.getBasePath() : '';
     return `${base}/${relativePath}`;
   }
@@ -183,39 +191,64 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
 
   private origin(): string { return `http://localhost:${this.server?.port ?? this.settings.port}`; }
 
-  private wrapperPath(): string {
-    return join(homedir(), '.local', 'bin', process.platform === 'win32' ? 'local-issues.cmd' : 'local-issues');
+  private async cliInstaller(): Promise<CliInstaller> {
+    const vault = await this.vaultPath();
+    return new CliInstaller({ home: homedir(), vault, version: this.manifest.version, nodeHint: this.settings.cliNodePath,
+      cancelled: () => this.unloaded,
+      pluginDir: join(vault, this.manifest.dir ?? `${this.app.vault.configDir}/plugins/local-issues`),
+      download: async url => {
+        let pendingTimer: ReturnType<typeof setTimeout> | undefined;
+        const response = await Promise.race([requestUrl({ url, throw: false }), new Promise<never>((_, reject) => {
+          const timer = setTimeout(() => reject(new Error('下载超时，请检查网络后重试。')), 30000);
+          // The timer is disposed when the underlying request settles.
+          pendingTimer = timer;
+        })]).finally(() => { if (pendingTimer) clearTimeout(pendingTimer); });
+        if (response.status !== 200) throw new Error(`下载失败（HTTP ${response.status}）`);
+        return new Uint8Array(response.arrayBuffer);
+      },
+    });
   }
 
-  /** 命令靠 --vault 自动读端口，插件改端口或换端口都不需要重装。 */
-  private wrapperScript(cli: string, vault: string): string {
-    const sh = (value: string) => value.replace(/'/g, `'\\''`);
-    if (process.platform === 'win32') return `@echo off\r\nrem managed by Local Issues\r\nnode "${cli}" --vault "${vault}" %*\r\n`;
-    return `#!/bin/sh\n# managed by Local Issues\nexec node '${sh(cli)}' --vault '${sh(vault)}' "$@"\n`;
+  onCliChange(callback: () => void): () => void { this.cliListeners.add(callback); return () => this.cliListeners.delete(callback); }
+  private cliChanged(): void { if (!this.unloaded) for (const listener of this.cliListeners) listener(); }
+  async refreshCliStatus(): Promise<void> {
+    if (this.cliBusy) return;
+    const version = this.cliStatusVersion;
+    let installed = false;
+    try { installed = await (await this.cliInstaller()).installed(); } catch { /* The install action reports actionable errors. */ }
+    if (version !== this.cliStatusVersion || this.cliBusy) return;
+    this.cliInstalled = installed;
+    this.cliChanged();
   }
-
-  private onPath(dir: string): boolean { return (process.env.PATH ?? '').split(delimiter).includes(dir); }
-
-  async installCli(quiet = false): Promise<string> {
-    const cli = await this.cliPath();
-    const target = this.wrapperPath();
-    await mkdir(dirname(target), { recursive: true });
-    await writeFile(target, this.wrapperScript(cli, await this.vaultPath()), 'utf8');
-    if (process.platform !== 'win32') await chmod(target, 0o755);
-    if (!quiet) {
-      const dir = dirname(target);
-      new Notice(this.onPath(dir) ? `已安装命令 local-issues，` + `在终端直接可用。` : `已安装 ${target}；该目录不在 PATH 中，请把它加入 PATH 后重开终端。`, 8000);
-    }
-    return target;
+  private cliOperation(remove: boolean): Promise<string> {
+    if (this.cliTask) return this.cliTask;
+    this.cliStatusVersion++;
+    this.cliBusy = true; this.cliProgress = []; this.cliMessage = ''; this.cliChanged();
+    const progress = (event: CliProgress) => {
+      const index = this.cliProgress.findIndex(item => item.step === event.step);
+      if (index < 0) this.cliProgress.push(event); else this.cliProgress[index] = event;
+      this.cliChanged();
+    };
+    this.cliTask = (async () => {
+      try {
+        const installer = await this.cliInstaller();
+        if (remove) {
+          progress({ step: 'remove', title: '卸载 CLI 命令', state: 'running' }); await installer.remove();
+          this.cliInstalled = false; progress({ step: 'remove', title: '卸载 CLI 命令', state: 'done' }); this.cliMessage = 'CLI 命令已卸载。';
+        } else {
+          const result = await installer.install(progress); this.cliInstalled = true;
+          this.cliMessage = `安装完成（${result.node}）。请重新打开终端后使用 local-issues。`;
+        }
+        new Notice(this.cliMessage); return installer.command;
+      } catch (error) {
+        if (!this.cliProgress.some(step => step.state === 'error')) progress({ step: remove ? 'remove' : 'prepare', title: remove ? '卸载 CLI 命令' : '准备安装', state: 'error', detail: error instanceof Error ? error.message : String(error), help: error instanceof CliInstallError ? error.help : '请确认相关目录可读写后重试。', link: error instanceof CliInstallError ? error.link : undefined });
+        throw error;
+      } finally { this.cliBusy = false; this.cliTask = undefined; this.cliChanged(); }
+    })();
+    return this.cliTask;
   }
-
-  async removeCli(): Promise<void> {
-    const target = this.wrapperPath();
-    const current = await readFile(target, 'utf8').catch(() => undefined);
-    if (current === undefined) { new Notice('没有找到本插件安装的 local-issues 命令。'); return; }
-    if (!current.includes('managed by Local Issues')) throw new Error(`${target} 不是本插件安装的，未删除。`);
-    await rm(target); new Notice(`已移除 ${target}`);
-  }
+  installCli(): Promise<string> { return this.cliOperation(false); }
+  async removeCli(): Promise<void> { await this.cliOperation(true); }
 
   async restartApi(): Promise<void> {
     this.apiQueue = this.apiQueue.catch(() => {}).then(async () => {
@@ -275,12 +308,15 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
 
   onunload(): void {
     this.unloaded = true;
+    this.cliListeners.clear();
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     void this.apiQueue.finally(() => this.server?.close()).catch(console.error);
   }
 }
 
 class LocalIssuesSettings extends PluginSettingTab {
+  private cliCleanup?: () => void;
+  hide(): void { this.cliCleanup?.(); this.cliCleanup = undefined; }
   constructor(app: App, private plugin: LocalIssuesPlugin) { super(app, plugin); }
   display(): void {
     const { containerEl: el, plugin: p } = this; el.empty(); suppressTooltips(el);
@@ -301,16 +337,33 @@ class LocalIssuesSettings extends PluginSettingTab {
         if (!/^\d+$/.test(value) || +value < 1024 || +value > 65535) return;
         p.settings.port = +value; await p.saveSettings();
       })).addButton(b => b.setButtonText('应用端口').onClick(async () => { await p.restartApi(); this.display(); }));
-    const cliDescription = document.createDocumentFragment();
-    cliDescription.append('全局命令 local-issues 指向当前笔记库（端口自动读取）。Agent 侧只需一份极简 skill：复制引导语可直接粘贴，复制 Skill 可自行保存为 local-issues/SKILL.md。社区商店安装后需另行下载 cli.mjs。');
-    const cliDownload = document.createElement('a');
-    cliDownload.href = 'https://github.com/xinxinrana/obsidian-local-issues/releases/latest';
-    cliDownload.textContent = '下载 CLI'; cliDownload.rel = 'noopener noreferrer';
-    cliDescription.append(' ', cliDownload);
-    new Setting(el).setName('Agent CLI').setDesc(cliDescription)
-      .addButton(b => b.setButtonText('安装命令').onClick(async () => { await p.installCli().catch(p.report); }))
-      .addButton(b => b.setButtonText('移除命令').onClick(async () => { await p.removeCli().catch(p.report); this.display(); }))
-      .addButton(b => b.setButtonText('复制引导语').setCta().onClick(() => p.copyGuide()))
+    const cli = new Setting(el).setName('Agent CLI').setDesc('安装后，Agent 可在终端直接使用 local-issues。');
+    let install!: HTMLButtonElement, remove!: HTMLButtonElement;
+    cli.addButton(b => { install = b.buttonEl; b.setButtonText('安装 CLI').setCta().onClick(() => { void p.installCli().catch(() => {}); }); })
+      .addButton(b => { remove = b.buttonEl; b.setButtonText('卸载 CLI').onClick(() => { void p.removeCli().catch(() => {}); }); });
+    const progress = el.createDiv({ cls: 'li-cli-progress' }); progress.setAttribute('aria-live', 'polite');
+    const renderCli = () => {
+      install.disabled = remove.disabled = p.cliBusy;
+      install.textContent = p.cliBusy ? '处理中…' : p.cliInstalled ? '修复安装' : '安装 CLI';
+      remove.hidden = !p.cliInstalled && !p.cliProgress.some(item => item.step === 'command' && item.state === 'done');
+      progress.replaceChildren();
+      for (const step of p.cliProgress) {
+        const line = progress.createEl('p', { cls: `li-cli-step is-${step.state}`, text: `${step.state === 'done' ? '已完成' : step.state === 'error' ? '未完成' : '正在进行'} · ${step.title}` });
+        if (step.state === 'error') {
+          line.setAttribute('role', 'alert');
+          progress.createEl('p', { text: step.detail || '操作失败，请重试。' });
+          if (step.help) progress.createEl('p', { text: step.help, cls: 'setting-item-description' });
+          if (step.link) { const link = progress.createEl('a', { text: step.step === 'node' ? '下载 Node.js' : '打开当前版本下载页', href: step.link }); link.rel = 'noopener noreferrer'; }
+          if (step.step === 'node') new Setting(progress).setName('已安装 Node.js？').setDesc('填写 node 可执行文件的完整路径后，再点安装。')
+            .addText(t => t.setPlaceholder('例如 /opt/homebrew/bin/node').setValue(p.settings.cliNodePath || '').onChange(async value => { p.settings.cliNodePath = value.trim(); await p.saveSettings(); }));
+        }
+      }
+      if (p.cliMessage) progress.createEl('p', { text: p.cliMessage, cls: 'li-cli-result' }).setAttribute('role', 'status');
+      else if (!p.cliProgress.length) progress.createEl('p', { text: p.cliInstalled ? 'CLI 命令已安装。' : '点击安装，将检查运行环境并补齐所需文件。', cls: 'setting-item-description' });
+    };
+    this.cliCleanup?.(); this.cliCleanup = p.onCliChange(renderCli); renderCli(); void p.refreshCliStatus();
+    new Setting(el).setName('Agent 接入').setDesc('复制引导语交给 Agent，或将 Skill 保存到 Agent 的技能目录。')
+      .addButton(b => b.setButtonText('复制引导语').onClick(() => p.copyGuide()))
       .addButton(b => b.setButtonText('复制 Skill').onClick(() => p.copySkill()));
     el.createEl('p', { text: '内容保存在 Markdown 文件中，附件位于 resource/local-issues/。停用插件后仍可直接阅读与编辑。链接用于定位仓库、项目或议题，无需登录或密钥，仅在这台电脑的 Obsidian 运行时可用。', cls: 'setting-item-description' });
   }

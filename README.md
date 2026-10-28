@@ -32,14 +32,14 @@ Open the ribbon button **Local Issues：项目**, or run **Local Issues：打开
 
 The CLI requires Node.js 22+ and a running desktop Obsidian instance with Local Issues enabled.
 
-1. Download `cli.mjs` from the same [release](https://github.com/xinxinrana/obsidian-local-issues/releases/latest) into the plugin folder (the ZIP already includes it).
+1. Open the Local Issues settings. The complete ZIP includes `cli.mjs`; other installations can download it through **安装 CLI**.
 2. Enable **本地 Agent API** in plugin settings. It is disabled by default on a new installation.
-3. The plugin installs a global `local-issues` command into `~/.local/bin`, bound to this vault and reading the port through `--vault`, so port changes need no reinstall. Settings can reinstall or remove it; you are told when the folder is missing from `PATH`.
+3. Click **安装 CLI** in settings. The installer checks Node.js 22+, reuses the bundled CLI or downloads the matching release with SHA-256 verification, installs `local-issues` in `~/.local/bin`, configures your user PATH and verifies the command. Reopen your terminal to use it. Failures show the current step and a relevant recovery action. The command uses `--vault`, so port changes need no reinstall.
 4. **复制引导语** copies a short hand-off telling the agent to save the skill into its own skills directory; **复制 Skill** copies `SKILL.md` only. Agents can also run `local-issues skill` (or `local-issues skill --dir <dir>`).
 
 Without the command, use `node '/path/to/plugin/cli.mjs' --vault "/path/to/vault" --help`.
 
-**复制 CLI 命令** copies a minimal skill with the tool purpose, current port, semantic link routing and CLI examples. Paste it to an agent or save it as `local-issues/SKILL.md`.
+**复制引导语** provides the agent hand-off; **复制 Skill** provides the standalone skill contents.
 
 The default configuration directory is `.obsidian`. The CLI currently expects that default directory when locating a vault's API settings.
 
@@ -84,17 +84,17 @@ local-issues issue close '<issue URL>'
 local-issues issue reopen '<issue URL>'
 ```
 
-The plugin installs the `local-issues` command; `npm install -g .` from the source directory also works, including on Windows. `local-issues view` infers the target type; `-P` accepts a project title, folder name or the project name from a link. Replace `local-issues` with `node '/absolute/path/cli.mjs' --vault '/path/to/vault'` if needed. Existing legacy share URLs and `local-issues share ...` commands remain compatible. See the [link and CLI guide](docs/agent-cli.zh-CN.md).
+The settings installer installs the `local-issues` command; `npm install -g .` from the source directory also works, including on Windows. `local-issues view` infers the target type; `-P` accepts a project title, folder name or the project name from a link. Replace `local-issues` with `node '/absolute/path/cli.mjs' --vault '/path/to/vault'` if needed. Existing legacy share URLs and `local-issues share ...` commands remain compatible. See the [link and CLI guide](docs/agent-cli.zh-CN.md).
 
 ## Local data and privacy
 
 Projects, issues, comments and status events live in `Local Issues/` by default. Each project has a `project.md` file, an `issues/` folder and a `timeline/` folder. Images and attachments are stored in `resource/local-issues/`. You can read and edit these Markdown files with Obsidian or another editor. Preserve their `id`, `type`, `projectId` and `issueId` properties. Issue states are `open` and `closed`; `closeReason` is `completed`, `on-hold`, or `not-planned`. Legacy `in-progress` is read as open.
 
-No account, subscription, payment or remote service is required. There is no telemetry. The plugin makes no requests to external services. Its optional HTTP server binds only to `127.0.0.1`, on port `27183` by default. CLI requests are restricted to loopback HTTP addresses. The local API requires no credentials and rejects browser cross-origin requests.
+No account, subscription, payment or remote service is required. There is no telemetry. Normal project operations use no external services; clicking **安装 CLI** may download the matching CLI and checksum file from GitHub. Its optional HTTP server binds only to `127.0.0.1`, on port `27183` by default. CLI requests are restricted to loopback HTTP addresses. The local API requires no credentials and rejects browser cross-origin requests.
 
 Resource links identify local data. They work only on the computer running Obsidian; the local CLI can read and modify the active vault.
 
-The plugin operates inside the vault. The separate CLI reads its settings from the vault and reads attachment or body files outside the vault **only when you explicitly pass their paths**. The plugin does not automatically download, install or update the CLI or other software. External links in settings open GitHub only when clicked.
+Project data stays inside the vault. The separate CLI reads its settings from the vault and reads attachment or body files outside the vault **only when you explicitly pass their paths**. CLI installation starts only when you click **安装 CLI**. It writes a user-local launcher and, where necessary, a marked shell PATH block (or the Windows user PATH). Uninstall removes its managed launcher and PATH changes while retaining the plugin CLI asset and unrelated user configuration. Existing commands owned by other tools or vaults are never overwritten. The plugin does not install commands on startup or install Node.js automatically; missing Node.js produces a download link and an optional executable-path field.
 
 ## Develop
 

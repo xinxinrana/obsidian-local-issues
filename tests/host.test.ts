@@ -78,7 +78,7 @@ test('bundled plugin registers native entry points; Vault adapter, protocol, API
     assert.match(await plugin.resourceLink(i.id), /^http:\/\/localhost:\d+\/.+\/issues\/1$/);
     await plugin.copyCli();
     assert.equal(clipboard.length, 0, 'A community installation must not copy a command for a missing CLI file');
-    assert.ok(mock.notices.some((message: string) => message.includes('下载独立的 cli.mjs')));
+    assert.ok(mock.notices.some((message: string) => message.includes('点击「安装 CLI」')));
     files.set('.obsidian/plugins/local-issues/cli.mjs', '#!/usr/bin/env node');
     const origin = new URL(share).origin;
     assert.equal(await (await fetch(`${origin}/api/cli.mjs`)).text(), '#!/usr/bin/env node');
@@ -117,8 +117,35 @@ test('bundled plugin registers native entry points; Vault adapter, protocol, API
     assert.match(clipboard.at(-1)!, /local-issues view 'http:\/\/localhost:\d+\//);
     assert.match(await plugin.resourceLink(i.id), /\/issues\/1$/);
     assert.match(await plugin.resourceLink(p.id), /^http:\/\/localhost:\d+\/[^/]+$/);
+    let attempts = 0, removals = 0, release!: () => void;
+    const gate = new Promise<void>(resolve => release = resolve);
+    plugin.cliInstaller = async () => ({
+      command: '/temporary-test-command', installed: async () => false,
+      install: async (notify: (progress: any) => void) => {
+        attempts++; notify({ step: 'node', title: '检查 Node.js', state: 'running' }); await gate;
+        if (attempts === 1) { notify({ step: 'node', title: '检查 Node.js', state: 'error', detail: '没有找到 Node.js', help: '安装 Node.js 后重试', link: 'https://nodejs.org/en/download' }); throw new Error('Node missing'); }
+        notify({ step: 'node', title: '检查 Node.js', state: 'done' }); return { command: '/temporary-test-command', node: 'v24.0.0' };
+      },
+      remove: async () => { removals++; },
+    });
     plugin.openSettings(); assert.match(mock.modals.at(-1).contentEl.textContent, /本地 Agent API/);
+    const settingsEl = mock.modals.at(-1).contentEl;
+    const install = [...settingsEl.querySelectorAll('button')].find((button: any) => button.textContent === '安装 CLI') as HTMLButtonElement;
+    assert.ok(install); assert.equal(settingsEl.querySelector('.li-cli-progress input'), null, 'No advanced Node controls before a failure');
+    install.click(); install.click(); await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(attempts, 1); assert.equal(install.disabled, true); assert.match(settingsEl.querySelector('.li-cli-progress').textContent, /正在进行/);
+    release(); for (let attempt = 0; attempt < 200 && plugin.cliBusy; attempt++) await new Promise(resolve => setTimeout(resolve, 5));
+    assert.match(settingsEl.querySelector('[role=alert]').textContent, /检查 Node/);
+    const nodePath = settingsEl.querySelector('.li-cli-progress input') as HTMLInputElement;
+    assert.ok(nodePath); nodePath.value = '/custom/node'; nodePath.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+    assert.equal(plugin.settings.cliNodePath, '/custom/node');
+    install.click(); for (let attempt = 0; attempt < 200 && plugin.cliBusy; attempt++) await new Promise(resolve => setTimeout(resolve, 5));
+    assert.equal(attempts, 2); assert.equal(plugin.cliInstalled, true); assert.match(settingsEl.querySelector('[role=status]').textContent, /安装完成/);
+    const uninstall = [...settingsEl.querySelectorAll('button')].find((button: any) => button.textContent === '卸载 CLI') as HTMLButtonElement;
+    assert.equal(uninstall.hidden, false); uninstall.click(); for (let attempt = 0; attempt < 200 && plugin.cliBusy; attempt++) await new Promise(resolve => setTimeout(resolve, 5));
+    assert.equal(removals, 1); assert.equal(plugin.cliInstalled, false); assert.equal(uninstall.hidden, true);
     mock.modals.at(-1).close();
+    assert.equal(plugin.cliListeners.size, 0, 'Closing the settings modal releases the progress listener');
     plugin.settings.apiEnabled = false;
     await plugin.restartApi();
     await assert.rejects(plugin.share(i.id), /启用本地 Agent API/);

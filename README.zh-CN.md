@@ -20,7 +20,7 @@ GitHub Issues 的本地 Obsidian 版。一个笔记库可以有多个项目，�
 
 在 [GitHub Releases](https://github.com/xinxinrana/obsidian-local-issues/releases/latest) 下载 `local-issues.zip`，将其中的 `local-issues` 文件夹放到笔记库的 `<配置目录>/plugins/` 中，再在 Obsidian 第三方插件设置中启用 **Local Issues**。默认配置目录是 `.obsidian`。
 
-也可以单独下载同一个版本的 `main.js`、`manifest.json`、`styles.css` 放入插件目录。社区商店只会安装这三个文件；可选 CLI 需要另行下载 `cli.mjs`，完整 ZIP 已包含它。
+也可以单独下载同一个版本的 `main.js`、`manifest.json`、`styles.css` 放入插件目录。社区商店只会安装这三个文件；可选 CLI 可在插件设置中点击「安装 CLI」，由插件下载并配置；完整 ZIP 已包含 CLI 文件。
 
 点击左侧 **Local Issues：项目** 图标，或在命令面板运行 **Local Issues：打开项目**。先新建项目，再创建 Issue。打开原始笔记、分享等操作位于 **更多** 菜单；新建与编辑 Issue 时，可展开 **属性与关联** 设置其他字段。保存按钮始终固定在弹窗底部。
 
@@ -28,9 +28,9 @@ GitHub Issues 的本地 Obsidian 版。一个笔记库可以有多个项目，�
 
 需要 Node.js 22 或更新版本，并保持 Obsidian 和插件运行。
 
-1. 从 Release 下载 `cli.mjs` 放入插件目录（完整 ZIP 已包含；社区商店安装需另行下载）。
+1. 在插件设置点击 **安装 CLI**。插件依次检查 Node.js、准备 CLI、安装命令、配置终端路径并验证。缺少 CLI 文件时，会下载与当前插件同版本的 Release 附件并校验 SHA-256；完整 ZIP 中已有的 CLI 会直接复用。
 2. 在插件设置中启用 **本地 Agent API**。全新安装时默认关闭。
-3. 插件加载后会把全局命令 `local-issues` 写到 `~/.local/bin`，指向当前笔记库并通过 `--vault` 自动读取端口；端口改动无需重装。该目录不在 PATH 时会有提示，设置页也可随时「安装命令 / 移除命令」。
+3. 重新打开终端，即可使用 `local-issues`。命令位于 `~/.local/bin`，绑定当前笔记库并通过 `--vault` 自动读取端口；端口改动无需重装。
 4. 把用法交给 agent：**复制引导语** 会复制「把 skill 存到你自己的 skills 目录」的说明，agent 自己知道目录在哪；**复制 Skill** 只复制 `SKILL.md` 正文。也可以让 agent 自己执行 `local-issues skill`（或 `local-issues skill --dir <目录>` 直接落盘）。
 
 命令缺失时用 `node '/插件目录/cli.mjs' --vault "/笔记库路径" --help` 代替。完整命令见 [English README](README.md#agent-cli)。
@@ -41,7 +41,7 @@ GitHub Issues 的本地 Obsidian 版。一个笔记库可以有多个项目，�
 
 同一链接交给 agent 时，用 CLI 直接读取 JSON。仓库首页、项目、Issues 列表和具体议题均可复制对应链接；列表链接保留筛选参数。无需登录或密钥。网页支持常见 Markdown、任务列表、表格及双链；笔记嵌入、标题／块引用和复杂 Obsidian 渲染请在 Obsidian 中查看。
 
-`http://localhost:27183/llms.txt` 提供 Agent 自举说明（含保存 skill 的办法，网页里不显示这一段）；`http://localhost:27183/api/cli.mjs` 下载当前插件目录中的独立 CLI，需要 Node.js 22+。插件目录缺少 CLI 时会提示下载失败，不会自动安装软件。
+`http://localhost:27183/llms.txt` 提供 Agent 自举说明（含保存 skill 的办法，网页里不显示这一段）；`http://localhost:27183/api/cli.mjs` 下载当前插件目录中的独立 CLI，需要 Node.js 22+。插件目录缺少 CLI 时，请先在设置中点击「安装 CLI」。
 
 ```sh
 local-issues view '<资源链接>' --json
@@ -52,17 +52,17 @@ local-issues issue comment '<议题链接>' --body-file reply.md
 local-issues issue close '<议题链接>'
 ```
 
-插件会自动安装 `local-issues` 命令；也可以从源码目录运行 `npm install -g .`（Windows 也适用）。上例 `local-issues` 可替换为 `node '/路径/cli.mjs' --vault '/笔记库路径'`。项目参数 `-P` 接受项目标题、文件夹名或链接里的项目名。详细路由与命令见[链接与 CLI 使用说明](docs/agent-cli.zh-CN.md)。
+点击设置中的「安装 CLI」即可安装 `local-issues` 命令；也可以从源码目录运行 `npm install -g .`（Windows 也适用）。上例 `local-issues` 可替换为 `node '/路径/cli.mjs' --vault '/笔记库路径'`。项目参数 `-P` 接受项目标题、文件夹名或链接里的项目名。详细路由与命令见[链接与 CLI 使用说明](docs/agent-cli.zh-CN.md)。
 
 ## 文件和隐私
 
 默认笔记目录为 `Local Issues/`，每个项目包含 `project.md`、`issues/` 和 `timeline/`。附件放在 `resource/local-issues/`。停用插件后仍可直接阅读与编辑。修改时请保留 `id`、`type`、`projectId` 和 `issueId`；Issue 状态为 `open` 或 `closed`；关闭原因 `closeReason` 为 `completed`、`on-hold` 或 `not-planned`。旧的 `in-progress` 会按开启读取。
 
-无需账号、订阅或付费，没有遥测。插件不会请求远程服务。本地 API 仅监听 `127.0.0.1`，默认端口 `27183`；CLI 仅连接本机地址。本地服务无需凭据，拒绝浏览器跨域请求。
+无需账号、订阅或付费，没有遥测。日常项目操作无需外部服务；点击「安装 CLI」时可能从 GitHub 下载当前版本的 CLI 和校验文件。本地 API 仅监听 `127.0.0.1`，默认端口 `27183`；CLI 仅连接本机地址。本地服务无需凭据，拒绝浏览器跨域请求。
 
 资源链接只定位本机数据，仅在运行 Obsidian 的这台电脑上可用。
 
-插件操作限定在笔记库内。独立 CLI 仅在你明确传入附件路径或 `--body-file` 时读取对应的库外文件。插件不会自动下载、安装或更新 CLI 或其他软件。设置中的 GitHub 下载链接只有在你点击时才会打开。
+项目数据保存在笔记库内。独立 CLI 仅在你明确传入附件路径或 `--body-file` 时读取对应的库外文件。CLI 安装仅在点击「安装 CLI」时进行，不会在插件启动时安装或覆盖命令。安装会写入用户目录的启动命令，必要时添加带标记的 shell PATH 配置（Windows 修改当前用户 PATH）。安装失败时，设置页展示当前步骤、失败原因及下一步操作；缺少 Node.js 时才显示官方下载链接和自定义路径输入。卸载会移除本次安装的命令及其 PATH 配置，保留用户其他配置与插件自带 CLI 文件；不会覆盖其他工具或其他笔记库的同名命令。
 
 ## 开发与反馈
 
