@@ -1,7 +1,9 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { randomBytes } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 import { ResourceRoutes, parseResource, slug } from './routes';
-import { attachmentPath, attachmentReferences, escapeHtml, htmlDocument, renderPage } from './web';
+import { attachmentPath, attachmentReferences, escapeHtml, htmlDocument, renderMarkdown, renderPage } from './web';
+import { startWebClient } from './web-client';
+import { agentSkill } from './agent-skill';
 import type { Issue, IssuePatch, IssueStore, ProjectPatch, Resolved, Snapshot } from './types';
 
 export interface Share { ref: string }
@@ -11,6 +13,8 @@ export interface ApiOptions {
   routes?: ResourceRoutes;
   open?: (ref: string) => Promise<void>;
   readAttachment?: (path: string) => Promise<Uint8Array>;
+  readCli?: () => Promise<string>;
+  author?: string;
 }
 const MAX_BODY = 24 * 1024 * 1024;
 class HttpError extends Error { constructor(public status: number, message: string, public code = 'INVALID_REQUEST') { super(message); } }
@@ -51,7 +55,7 @@ function send(res: ServerResponse, status: number, value: unknown): void {
 function sendHtml(res: ServerResponse, status: number, html: string): void {
   res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', Vary: 'Accept',
     'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY',
-    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'" });
+    'Content-Security-Policy': "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'unsafe-inline'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'" });
   res.end(html);
 }
 function acceptsHtml(accept = ''): boolean {
@@ -89,7 +93,8 @@ function filteredIssues(snapshot: Snapshot, query: URLSearchParams, projectId?: 
   for (const label of query.getAll('label')) result = result.filter(i => i.labels.includes(label));
   if (query.has('milestone')) result = result.filter(i => i.milestone === query.get('milestone'));
   for (const assignee of query.getAll('assignee')) result = result.filter(i => i.assignees.includes(assignee));
-  result.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const sort = query.get('sort');
+  result.sort((a, b) => sort === 'title' ? a.title.localeCompare(b.title) : sort === 'created' ? a.createdAt.localeCompare(b.createdAt) : sort === 'due' ? (a.dueDate || '9999').localeCompare(b.dueDate || '9999') : b.updatedAt.localeCompare(a.updatedAt));
   const limit = query.get('limit');
   if (limit) result = result.slice(0, Math.max(0, Math.min(10000, Number(limit) || 30)));
   return result;
@@ -99,6 +104,16 @@ export async function startApi(options: ApiOptions): Promise<{ close: () => Prom
   const { store } = options;
   const routes = options.routes ?? new ResourceRoutes(slug(options.vaultName));
   let actualPort = options.port;
+  const attachmentKey = randomBytes(32);
+  const access = (ref: string, path: string) => createHmac('sha256', attachmentKey).update(`${ref}\0${path}`).digest('hex');
+  const attachmentUrl = (ref: string, path: string) => `/api/attachments?ref=${encodeURIComponent(ref)}&path=${encodeURIComponent(path)}&access=${access(ref, path)}`;
+  async function attach(ref: string, body: Record<string, unknown>) {
+    const name = str(body.name, 'name'), base64 = str(body.base64, 'base64');
+    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(base64) || base64.length % 4 !== 0) throw new HttpError(400, '附件必须是有效 base64。');
+    const bytes = Buffer.from(base64, 'base64');
+    if (bytes.length > 16 * 1024 * 1024) throw new HttpError(413, '单次附件最大 16 MB。', 'TOO_LARGE');
+    return store.attach(ref, name, bytes);
+  }
   async function detail(ref: string, project?: string): Promise<Record<string, unknown>> {
     return issueDetail(await store.getIssue(ref, project), await store.snapshot());
   }
@@ -128,21 +143,45 @@ export async function startApi(options: ApiOptions): Promise<{ close: () => Prom
       let parts = url.pathname.split('/').filter(Boolean).map(x => { try { return decodeURIComponent(x); } catch { throw new HttpError(400, '地址编码不正确。'); } });
       const method = req.method ?? 'GET';
       const shared = parts[0] === 'api' && parts[1] === 'shares' && !!parts[2];
-      const resource = parseResource(url);
+      const resource = url.pathname === '/llms.txt' ? undefined : parseResource(url);
       browserHtml = method === 'GET' && acceptsHtml(req.headers.accept) && ((!!resource && !resource.suffix.length) || (shared && parts.length <= 4 && (!parts[3] || parts[3] === 'resolve')));
-      const browserRead = browserHtml || (method === 'GET' && url.pathname === '/api/attachments');
-      if ((req.headers.origin && (!browserRead || req.headers.origin !== `http://${host}`)) ||
-        (req.headers['sec-fetch-site'] && req.headers['sec-fetch-site'] !== 'none' && !(browserRead && req.headers['sec-fetch-site'] === 'same-origin'))) {
+      const origin = `http://${host}`;
+      const webRequest = req.headers['x-local-issues'] === 'web' && req.headers['sec-fetch-site'] === 'same-origin' &&
+        (method === 'GET' ? !req.headers.origin || req.headers.origin === origin : req.headers.origin === origin && /^application\/json(?:;|$)/i.test(req.headers['content-type'] || ''));
+      const browserRead = browserHtml || (method === 'GET' && ['/api/attachments', '/api/web-client.js', '/api/cli.mjs', '/llms.txt'].includes(url.pathname));
+      if (!webRequest && ((req.headers.origin && (!browserRead || req.headers.origin !== origin)) ||
+        (req.headers['sec-fetch-site'] && req.headers['sec-fetch-site'] !== 'none' && !(browserRead && req.headers['sec-fetch-site'] === 'same-origin')))) {
         throw new HttpError(403, '只允许本机 CLI 或同源页面读取。', 'FORBIDDEN');
+      }
+      if (method === 'GET' && ['/api/web-client.js', '/api/cli.mjs', '/llms.txt'].includes(url.pathname)) {
+        const cli = url.pathname === '/api/cli.mjs';
+        if (cli && !options.readCli) throw new HttpError(404, '请将 cli.mjs 放入插件目录。', 'NOT_FOUND');
+        const text = cli ? await options.readCli!() : url.pathname === '/llms.txt'
+          ? `# Local Issues\n\n本地网页可管理项目、议题、评论、状态和附件，与 Obsidian 共用 Markdown 数据。\n\nCLI 下载：http://localhost:${actualPort}/api/cli.mjs\n保存为 cli.mjs，需要 Node.js 22+。不需要登录或密钥。\n\n${agentSkill('./cli.mjs', actualPort)}`
+          : `(${startWebClient.toString()})();`;
+        res.writeHead(200, { 'Content-Type': url.pathname === '/llms.txt' ? 'text/plain; charset=utf-8' : 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store',
+          'X-Content-Type-Options': 'nosniff', 'Cross-Origin-Resource-Policy': 'same-origin', ...(cli ? { 'Content-Disposition': 'attachment; filename="cli.mjs"' } : {}) });
+        res.end(text); return;
+      }
+      if (method === 'POST' && url.pathname === '/api/preview') {
+        const body = await readBody(req), ref = typeof body.ref === 'string' ? body.ref : '';
+        const resolved = ref ? await store.resolve(ref) : undefined;
+        if (resolved?.kind === 'note') throw new HttpError(400, '预览仅支持项目和议题。');
+        await routes.sync(store);
+        const snapshot = await store.snapshot();
+        send(res, 200, { ok: true, data: { html: renderMarkdown(str(body.body, 'body', false), { snapshot, routes, vaultName: options.vaultName,
+          attachmentUrl, project: resolved?.kind === 'project' ? resolved.value : undefined, issue: resolved?.kind === 'issue' ? resolved.value : undefined }) } }); return;
       }
       if (method === 'GET' && url.pathname === '/api/health') { send(res, 200, { ok: true, data: { name: 'Local Issues', version: '0.1.6' } }); return; }
       if (method === 'GET' && url.pathname === '/api/attachments') {
         const path = attachmentPath(url.searchParams.get('path') ?? '');
         if (!path || !options.readAttachment) throw new HttpError(404, '附件不存在。', 'NOT_FOUND');
-        const issue = await store.getIssue(str(url.searchParams.get('issue'), 'issue'));
+        const ref = str(url.searchParams.get('ref') ?? url.searchParams.get('issue'), 'ref');
+        const resolved = await store.resolve(ref);
+        if (resolved.kind === 'note') throw new HttpError(404, '附件不存在。', 'NOT_FOUND');
         const snapshot = await store.snapshot();
-        const texts = [issue.body, ...snapshot.timeline.filter(t => t.issueId === issue.id && t.kind === 'comment').map(t => t.body)];
-        if (!texts.some(text => attachmentReferences(text).has(path))) throw new HttpError(404, '议题中未引用此附件。', 'NOT_FOUND');
+        const texts = resolved.kind === 'issue' ? [resolved.value.body, ...snapshot.timeline.filter(t => t.issueId === resolved.value.id && t.kind === 'comment').map(t => t.body)] : [resolved.value.description];
+        if (url.searchParams.get('access') !== access(resolved.value.id, path) && !texts.some(text => attachmentReferences(text).has(path))) throw new HttpError(404, '议题中未引用此附件。', 'NOT_FOUND');
         const bytes = await options.readAttachment(path);
         if (bytes.byteLength > 16 * 1024 * 1024) throw new HttpError(413, '附件超过 16 MB，请在 Obsidian 中打开。', 'TOO_LARGE');
         const ext = path.split('.').at(-1)!.toLowerCase();
@@ -162,7 +201,7 @@ export async function startApi(options: ApiOptions): Promise<{ close: () => Prom
           const issue = resource.kind === 'issue' ? snapshot.issues.find(i => i.projectId === project?.id && i.number === resource.number) : undefined;
           // Keep both tab counts within the current search/attribute filters.
           const query = new URLSearchParams(url.search); query.delete('state'); query.delete('status'); query.delete('limit');
-          sendHtml(res, 200, renderPage({ snapshot, routes, vaultName: options.vaultName, url, project, issue,
+          sendHtml(res, 200, renderPage({ snapshot, routes, vaultName: options.vaultName, url, project, issue, attachmentUrl, author: options.author,
             issues: project ? filteredIssues(snapshot, query, project.id) : undefined })); return;
         }
         if (!path) {
@@ -191,7 +230,7 @@ export async function startApi(options: ApiOptions): Promise<{ close: () => Prom
           const scoped = { ...snapshot, projects: project ? [project] : [],
             issues: snapshot.issues.filter(i => issue ? i.id === issue.id : i.projectId === project?.id),
             timeline: snapshot.timeline.filter(t => issue ? t.issueId === issue.id : snapshot.issues.some(i => i.projectId === project?.id && i.id === t.issueId)), warnings: [] };
-          sendHtml(res, 200, renderPage({ snapshot: scoped, routes, vaultName: options.vaultName, url, project, issue })); return;
+          sendHtml(res, 200, renderPage({ snapshot: scoped, routes, vaultName: options.vaultName, url, project, issue, attachmentUrl, author: options.author })); return;
         }
         if (parts.length <= 4 && (!parts[3] || parts[3] === 'resolve')) {
           if (method === 'GET') data = await resolvedDetail(resolved, true);
@@ -225,6 +264,8 @@ export async function startApi(options: ApiOptions): Promise<{ close: () => Prom
           const project = await store.getProject(parts[2]); data = { project, issues: (await store.snapshot()).issues.filter(i => i.projectId === project.id) };
         } else if (parts.length === 3 && method === 'PATCH') {
           const body = await readBody(req); data = await store.updateProject(parts[2], pick<ProjectPatch>(body, PROJECT_FIELDS), expected(req, body));
+        } else if (parts.length === 4 && parts[3] === 'attachments' && method === 'POST') {
+          const project = await store.getProject(parts[2]); data = await attach(project.id, await readBody(req)); status = 201;
         } else throw new HttpError(404, '项目接口不存在。', 'NOT_FOUND');
       } else if (parts[1] === 'issues') {
         const project = url.searchParams.get('project') ?? undefined;
@@ -243,11 +284,7 @@ export async function startApi(options: ApiOptions): Promise<{ close: () => Prom
             if (parts[3] === 'comments') { data = await store.addComment(issue.id, str(body.body, 'body'), typeof body.author === 'string' ? body.author : 'Agent'); status = 201; }
             else if (parts[3] === 'close' || parts[3] === 'reopen') data = await store.updateIssue(issue.id, { status: parts[3] === 'close' ? 'closed' : 'open', ...(typeof body.closeReason === 'string' && parts[3] === 'close' ? { closeReason: body.closeReason as IssuePatch['closeReason'] } : {}), actor: typeof body.actor === 'string' ? body.actor : typeof body.author === 'string' ? body.author : 'Agent' }, expected(req, body));
             else if (parts[3] === 'attachments') {
-              const name = str(body.name, 'name'), base64 = str(body.base64, 'base64');
-              if (!/^[A-Za-z0-9+/]*={0,2}$/.test(base64) || base64.length % 4 !== 0) throw new HttpError(400, '附件必须是有效 base64。');
-              const bytes = Buffer.from(base64, 'base64');
-              if (bytes.length > 16 * 1024 * 1024) throw new HttpError(413, '单次附件最大 16 MB。', 'TOO_LARGE');
-              data = await store.attach(issue.id, name, bytes); status = 201;
+              data = await attach(issue.id, body); status = 201;
             } else if (parts[3] === 'open' && options.open) { await options.open(issue.id); data = { opened: true }; }
             else throw new HttpError(404, 'Issue 接口不存在。', 'NOT_FOUND');
           } else throw new HttpError(404, 'Issue 接口不存在。', 'NOT_FOUND');

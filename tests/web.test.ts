@@ -36,8 +36,8 @@ test('browser links render projects, default-open lists, filters, board, table a
     assert.ok([...doc.querySelectorAll('a')].some(a => a.textContent === '子议题' && a.href.endsWith(`/issues/${child.number}`)));
     assert.ok([...doc.querySelectorAll('a')].some(a => a.textContent === '已完成的事项' && a.href.endsWith(`/issues/${two.number}`)));
     assert.equal(doc.querySelector('code')?.textContent, '[[不应转换]]');
-    assert.match(doc.querySelector('.edit')!.getAttribute('href')!, /^obsidian:\/\/local-issues\?vault=Tests&issue=i-/);
-    assert.ok([...doc.querySelectorAll('form')].every(form => form.method === 'get'));
+    assert.match(doc.querySelector('nav a.button')!.getAttribute('href')!, /^obsidian:\/\/local-issues\?vault=Tests&issue=i-/);
+    assert.equal(doc.querySelector('form[data-api]')?.getAttribute('data-method'), 'POST');
     assert.equal((await f.request('/产品/issues/1')).data.issue.id, one.id);
     const explicit = await fetch(`${f.url}/产品/issues/1`, { headers: { Accept: 'text/html;q=0.5,application/json' } });
     assert.match(explicit.headers.get('content-type')!, /application\/json/);
@@ -59,7 +59,7 @@ test('HTML escapes executable content and legacy shares retain their narrow view
     assert.match(response.headers.get('content-security-policy')!, /default-src 'none'/);
     assert.equal(response.headers.get('x-frame-options'), 'DENY');
     const doc = new JSDOM(await response.text()).window.document;
-    assert.equal(doc.querySelectorAll('script,iframe,svg,img,[onerror],[onload]').length, 0);
+    assert.equal(doc.querySelectorAll('script:not([src="/api/web-client.js"]),iframe,svg,img,[onerror],[onload]').length, 0);
     assert.ok([...doc.querySelectorAll('a')].every(a => !/^(?:javascript|data):/i.test(a.getAttribute('href')!)));
     assert.match(doc.querySelector('h1')!.textContent!, /<script>bad/);
     const share = await f.request('/api/shares', 'POST', { ref: issue.id });

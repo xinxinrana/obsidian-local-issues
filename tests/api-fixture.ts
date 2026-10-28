@@ -26,7 +26,7 @@ export async function fixture() {
   const store = new Store(adapter);
   const shares: Record<string, Share> = {};
   const server = await startApi({ store, port: 0, vaultName: 'Tests', shares, saveShares: async () => {},
-    readAttachment: path => readFile(join(vault, path)) });
+    readAttachment: path => readFile(join(vault, path)), readCli: () => readFile(join(process.cwd(), 'cli.mjs'), 'utf8') });
   const url = `http://127.0.0.1:${server.port}`;
   async function request(path: string, method = 'GET', body?: unknown, custom: Record<string, string> = {}) {
     const response = await fetch(new URL(path, url), { method, headers: { 'Content-Type': 'application/json', ...custom }, body: body === undefined ? undefined : JSON.stringify(body) });

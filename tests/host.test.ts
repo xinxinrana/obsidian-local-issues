@@ -19,9 +19,10 @@ test('bundled plugin registers native entry points; Vault adapter, protocol, API
   let injectExternalEdit = false;
   const vault = {
     configDir: '.obsidian', getName: () => 'Tests', getMarkdownFiles: () => [...files.keys()].map(p => new mock.TFile(p)),
-    getAbstractFileByPath: (p: string) => files.has(p) ? new mock.TFile(p) : null,
-    adapter: { exists: async (p: string) => files.has(p) || folders.has(p) || binary.has(p) },
+    getAbstractFileByPath: (p: string) => files.has(p) || binary.has(p) ? Object.assign(new mock.TFile(p), { stat: { size: binary.get(p)?.byteLength || files.get(p)?.length || 0 } }) : null,
+    adapter: { exists: async (p: string) => files.has(p) || folders.has(p) || binary.has(p), read: async (p: string) => { if (!files.has(p)) throw new Error('文件不存在'); return files.get(p)!; } },
     read: async (f: { path: string }) => files.get(f.path)!,
+    readBinary: async (f: { path: string }) => Uint8Array.from(binary.get(f.path)!).buffer,
     createFolder: async (p: string) => { folders.add(p); },
     create: async (p: string, s: string) => { assert.ok(!files.has(p)); files.set(p, s); changed(); return new mock.TFile(p); },
     createBinary: async (p: string, data: ArrayBuffer) => { binary.set(p, new Uint8Array(data)); changed(); return new mock.TFile(p); },
@@ -44,7 +45,7 @@ test('bundled plugin registers native entry points; Vault adapter, protocol, API
       revealLeaf: async () => {}, openLinkText: async (p: string) => { openedNotes.push(p); },
     },
   };
-  const built = await build({ entryPoints: ['src/main.ts'], bundle: true, write: false, format: 'cjs', platform: 'node', external: ['obsidian'], target: 'es2022', logLevel: 'silent' });
+  const built = await build({ entryPoints: ['src/main.ts'], bundle: true, write: false, minify: true, format: 'cjs', platform: 'node', external: ['obsidian'], target: 'es2022', logLevel: 'silent' });
   const module = { exports: {} as any };
   vm.runInNewContext(built.outputFiles[0].text, { module, exports: module.exports,
     require: (id: string) => id === 'obsidian' ? mock : require(id),
@@ -79,6 +80,29 @@ test('bundled plugin registers native entry points; Vault adapter, protocol, API
     assert.equal(clipboard.length, 0, 'A community installation must not copy a command for a missing CLI file');
     assert.ok(mock.notices.some((message: string) => message.includes('下载独立的 cli.mjs')));
     files.set('.obsidian/plugins/local-issues/cli.mjs', '#!/usr/bin/env node');
+    const origin = new URL(share).origin;
+    assert.equal(await (await fetch(`${origin}/api/cli.mjs`)).text(), '#!/usr/bin/env node');
+    const image = await plugin.store.attach(i.id, 'web.png', new Uint8Array([137, 80, 78, 71]));
+    await plugin.store.addComment(i.id, image.markdown);
+    const html = await (await fetch(share, { headers: { Accept: 'text/html' } })).text();
+    const web = new JSDOM(html, { url: share, runScripts: 'outside-only' });
+    try {
+      const img = web.window.document.querySelector('img')!;
+      assert.deepEqual(new Uint8Array(await (await fetch(new URL(img.getAttribute('src')!, origin))).arrayBuffer()), new Uint8Array([137, 80, 78, 71]));
+      const destinations: string[] = [];
+      Object.assign(web.window, { AbortController, __services: {
+        navigate: (path: string) => destinations.push(path),
+        request: (path: string, options: RequestInit) => fetch(new URL(path, origin), { ...options, headers: { ...options.headers, Origin: origin, 'Sec-Fetch-Site': 'same-origin' } }),
+      } });
+      const script = await (await fetch(`${origin}/api/web-client.js`)).text();
+      web.window.eval(script.replace(/\)\(\);$/, ')(window.__services);'));
+      const form = web.window.document.querySelector<HTMLFormElement>(`form[data-api="/api/issues/${i.id}/comments"]`)!;
+      form.querySelector('textarea')!.value = '从实际插件构建的网页提交';
+      form.dispatchEvent(new web.window.Event('submit', { bubbles: true, cancelable: true }));
+      for (let attempt = 0; attempt < 200 && !destinations.length; attempt++) await new Promise(resolve => setTimeout(resolve, 5));
+      assert.equal(destinations.length, 1, form.textContent!);
+      assert.ok((await plugin.store.snapshot()).timeline.some((entry: any) => entry.body === '从实际插件构建的网页提交'));
+    } finally { web.window.close(); }
     await plugin.copyCli();
     assert.match(clipboard[0], /^---\nname: local-issues\n/);
     assert.ok(clipboard[0].includes(`http://localhost:${new URL(share).port}/`), 'Use the running API port, including dynamically allocated ports');

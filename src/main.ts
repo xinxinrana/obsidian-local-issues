@@ -173,7 +173,8 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
       try {
         this.server = await startApi({ store: this.store, port: this.settings.port,
           vaultName: this.app.vault.getName(), routes: this.routes, shares: this.settings.shares,
-          saveShares: () => this.saveData(this.settings), open: ref => this.openReference(ref),
+          saveShares: () => this.saveData(this.settings), open: ref => this.openReference(ref), author: this.settings.author,
+          readCli: () => this.app.vault.adapter.read(`${this.manifest.dir ?? `${this.app.vault.configDir}/plugins/local-issues`}/cli.mjs`),
           readAttachment: async path => {
             const file = this.app.vault.getAbstractFileByPath(path);
             if (!(file instanceof TFile)) throw new Error('附件不存在。');
