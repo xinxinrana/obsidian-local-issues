@@ -59,7 +59,7 @@ function skillBody(options: SkillOptions): string {
     '',
     '输出：默认是制表符分隔的文本（列表列依次为编号、状态、项目、标题、标签；带 `-P` 或链接时没有项目列），空字段留空但不省略制表符。需要给程序处理时加 `--json`，可裁剪字段（`--json number,title,status`）；跨项目列表里每条都带 `project` 字段。',
     '',
-    '改正文时带上 `--if-match <updatedAt>` 可避免覆盖别人的并发修改。评论和创建默认作者是 `Agent`，多个 agent 同时操作时用 `--author <名字>` 区分。关闭议题是 `issue close`，删除评论是 `comment delete`，这两类操作先跟用户确认。',
+    '改正文时带上 `--if-match <updatedAt>` 可避免覆盖别人的并发修改。评论一律带 `--author <名字>`（创建默认 `Agent`）：不带也能发，但会收到醒目警告，事后分不清是谁写的。关闭议题是 `issue close`，删除评论是 `comment delete`，这两类操作先跟用户确认。',
     '',
     '`--help` 查看全部用法，`local-issues issue --help` 只看某一组命令；`local-issues --version` 显示版本。',
     '',

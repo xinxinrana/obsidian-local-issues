@@ -183,6 +183,18 @@ function required(value, label) {
   if (!value) throw new Error(`\u8BF7\u63D0\u4F9B${label}\u3002`);
   return value;
 }
+function warnMissingAuthor(f) {
+  if (val(f, "author") !== void 0) return;
+  const line = "!".repeat(60);
+  const notice = [
+    line,
+    "\u8B66\u544A\uFF1A\u8FD9\u6761\u8BB0\u5F55\u6CA1\u6709\u8EAB\u4EFD\u6807\u7B7E\uFF0C\u65F6\u95F4\u7EBF\u91CC\u4F1A\u663E\u793A\u4E3A\u300CAgent\u300D\u3002",
+    "\u591A\u4E2A agent \u6216\u4EBA\u5171\u7528\u540C\u4E00\u6761\u8BAE\u9898\u65F6\uFF0C\u4E8B\u540E\u65E0\u6CD5\u5206\u8FA8\u662F\u8C01\u5199\u7684\u3002",
+    "\u64CD\u4F5C\u5DF2\u751F\u6548\uFF0C\u4E0D\u7528\u91CD\u8BD5\uFF1B\u4E0B\u6B21\u8BF7\u52A0 --author <\u540D\u5B57>\uFF0C\u4F8B\u5982 --author Pi\u3002",
+    line
+  ].join("\n");
+  console.error(notice);
+}
 function body(f) {
   const file = val(f, "body-file");
   if (file !== void 0) return readFileSync(file === "-" ? 0 : resolve(file), "utf8");
@@ -300,8 +312,7 @@ ${data.path ?? data.id}`);
     return;
   }
   if (data?.body !== void 0) {
-    console.log(`${data.id ? `${data.id}
-` : ""}${data.body}`);
+    console.log(data.id || data.body);
     return;
   }
   console.log(JSON.stringify(data, null, 2));
@@ -387,6 +398,7 @@ async function main() {
     else if (action === "comment") {
       url.pathname = url.pathname.replace(/\/resolve$/, "/comments");
       data = await api.request(url.pathname + url.search, "POST", { body: required(body(flags), "\u8BC4\u8BBA\u6B63\u6587\uFF08--body \u6216 --body-file\uFF09"), author: val(flags, "author") ?? "Agent" });
+      warnMissingAuthor(flags);
     } else if (action === "comment-edit") {
       url.pathname = url.pathname.replace(/\/resolve$/, `/comments/${encodeURIComponent(required(extra, "\u8BC4\u8BBAID"))}`);
       data = await api.request(url.pathname + url.search, "PATCH", { body: required(body(flags), "\u8BC4\u8BBA\u6B63\u6587\uFF08--body \u6216 --body-file\uFF09") });
@@ -468,12 +480,15 @@ ${note}` : ""}`;
         if (!val(flags, "if-match")) patch.expectedUpdatedAt = current.revision ?? current.updatedAt;
       }
       data = await api.request(issuePath(required(ref, "Issue \u5F15\u7528")), "PATCH", patch);
-    } else if (action === "comment") data = await api.request(subPath(required(ref, "Issue \u5F15\u7528"), "comments"), "POST", { body: required(body(flags), "\u8BC4\u8BBA\u6B63\u6587\uFF08--body \u6216 --body-file\uFF09"), author: val(flags, "author") ?? "Agent" });
-    else if (action === "close" || action === "reopen") data = await api.request(subPath(required(ref, "Issue \u5F15\u7528"), action), "POST", { ...action === "close" && val(flags, "reason") ? { closeReason: val(flags, "reason") } : {}, actor: val(flags, "author") ?? "Agent" });
+    } else if (action === "comment") {
+      data = await api.request(subPath(required(ref, "Issue \u5F15\u7528"), "comments"), "POST", { body: required(body(flags), "\u8BC4\u8BBA\u6B63\u6587\uFF08--body \u6216 --body-file\uFF09"), author: val(flags, "author") ?? "Agent" });
+      warnMissingAuthor(flags);
+    } else if (action === "close" || action === "reopen") data = await api.request(subPath(required(ref, "Issue \u5F15\u7528"), action), "POST", { ...action === "close" && val(flags, "reason") ? { closeReason: val(flags, "reason") } : {}, actor: val(flags, "author") ?? "Agent" });
     else if (action === "attach") {
       const file = resolve(required(extra, "\u9644\u4EF6\u6587\u4EF6"));
       const attachment = await api.request(subPath(required(ref, "Issue \u5F15\u7528"), "attachments"), "POST", { name: basename(file), base64: readFileSync(file).toString("base64") });
       await api.request(subPath(ref, "comments"), "POST", { body: [body(flags), attachment.markdown].filter(Boolean).join("\n\n"), author: val(flags, "author") ?? "Agent" });
+      warnMissingAuthor(flags);
       data = attachment;
     } else if (action === "share") {
       const current = await api.request(issuePath(required(ref, "Issue \u5F15\u7528")));

@@ -131,6 +131,20 @@ function list(f: Flags, key: string): string[] | undefined {
   return (Array.isArray(f[key]) ? f[key] as string[] : [String(f[key])]).flatMap(x => key === 'field' || key === 'header' ? [x] : x.split(',')).map(x => x.trim()).filter(Boolean);
 }
 function required(value: string | undefined, label: string): string { if (!value) throw new Error(`请提供${label}。`); return value; }
+
+/** Comments are the one place where a missing identity is silently confusing later. */
+function warnMissingAuthor(f: Flags): void {
+  if (val(f, 'author') !== undefined) return;
+  const line = '!'.repeat(60);
+  const notice = [
+    line,
+    '警告：这条记录没有身份标签，时间线里会显示为「Agent」。',
+    '多个 agent 或人共用同一条议题时，事后无法分辨是谁写的。',
+    '操作已生效，不用重试；下次请加 --author <名字>，例如 --author Pi。',
+    line,
+  ].join('\n');
+  console.error(notice);
+}
 function body(f: Flags): string | undefined {
   const file = val(f, 'body-file');
   if (file !== undefined) return readFileSync(file === '-' ? 0 : resolve(file), 'utf8');
@@ -202,7 +216,8 @@ function print(data: any, flags: Flags, kind?: string): void {
   }
   if (data?.project) { console.log(`${data.project.title}\n${data.project.description}\n`); print(data.issues ?? [], {}, 'issue'); return; }
   if (data?.title) { console.log(`${data.number ? `#${data.number} ` : ''}${data.title}\n${data.path ?? data.id}`); return; }
-  if (data?.body !== undefined) { console.log(`${data.id ? `${data.id}\n` : ''}${data.body}`); return; }
+  // Print the id alone so `comment delete \$(...)` works; the body is what the user just wrote.
+  if (data?.body !== undefined) { console.log(data.id || data.body); return; }
   console.log(JSON.stringify(data, null, 2));
 }
 function issuePatch(f: Flags): Record<string, unknown> {
@@ -264,7 +279,7 @@ async function main(): Promise<void> {
       data = await api.request(url.pathname + url.search, 'PATCH', patch);
     }
     else if (action === 'close' || action === 'reopen') data = await api.request(url.pathname + url.search, 'PATCH', { status: action === 'close' ? 'closed' : 'open', ...(action === 'close' && val(flags, 'reason') ? { closeReason: val(flags, 'reason') } : {}), actor: val(flags, 'author') ?? 'Agent' });
-    else if (action === 'comment') { url.pathname = url.pathname.replace(/\/resolve$/, '/comments'); data = await api.request(url.pathname + url.search, 'POST', { body: required(body(flags), '评论正文（--body 或 --body-file）'), author: val(flags, 'author') ?? 'Agent' }); }
+    else if (action === 'comment') { url.pathname = url.pathname.replace(/\/resolve$/, '/comments'); data = await api.request(url.pathname + url.search, 'POST', { body: required(body(flags), '评论正文（--body 或 --body-file）'), author: val(flags, 'author') ?? 'Agent' }); warnMissingAuthor(flags); }
     else if (action === 'comment-edit') { url.pathname = url.pathname.replace(/\/resolve$/, `/comments/${encodeURIComponent(required(extra, '评论ID'))}`); data = await api.request(url.pathname + url.search, 'PATCH', { body: required(body(flags), '评论正文（--body 或 --body-file）') }); }
     else throw new Error('分享链接支持 view、edit、comment、comment-edit、close、reopen。');
   } else if (command === 'repo') {
@@ -331,12 +346,12 @@ async function main(): Promise<void> {
         if (!val(flags, 'if-match')) patch.expectedUpdatedAt = current.revision ?? current.updatedAt;
       }
       data = await api.request(issuePath(required(ref, 'Issue 引用')), 'PATCH', patch);
-    } else if (action === 'comment') data = await api.request(subPath(required(ref, 'Issue 引用'), 'comments'), 'POST', { body: required(body(flags), '评论正文（--body 或 --body-file）'), author: val(flags, 'author') ?? 'Agent' });
+    } else if (action === 'comment') { data = await api.request(subPath(required(ref, 'Issue 引用'), 'comments'), 'POST', { body: required(body(flags), '评论正文（--body 或 --body-file）'), author: val(flags, 'author') ?? 'Agent' }); warnMissingAuthor(flags); }
     else if (action === 'close' || action === 'reopen') data = await api.request(subPath(required(ref, 'Issue 引用'), action), 'POST', { ...(action === 'close' && val(flags, 'reason') ? { closeReason: val(flags, 'reason') } : {}), actor: val(flags, 'author') ?? 'Agent' });
     else if (action === 'attach') {
       const file = resolve(required(extra, '附件文件'));
       const attachment = await api.request(subPath(required(ref, 'Issue 引用'), 'attachments'), 'POST', { name: basename(file), base64: readFileSync(file).toString('base64') });
-      await api.request(subPath(ref!, 'comments'), 'POST', { body: [body(flags), attachment.markdown].filter(Boolean).join('\n\n'), author: val(flags, 'author') ?? 'Agent' });
+      await api.request(subPath(ref!, 'comments'), 'POST', { body: [body(flags), attachment.markdown].filter(Boolean).join('\n\n'), author: val(flags, 'author') ?? 'Agent' }); warnMissingAuthor(flags);
       data = attachment;
     } else if (action === 'share') { const current = await api.request(issuePath(required(ref, 'Issue 引用'))); data = await api.request(`/api/links?ref=${encodeURIComponent(current.issue.id)}`); }
     else throw new Error('未知 Issue 命令。运行 local-issues --help 查看用法。');

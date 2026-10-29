@@ -72,6 +72,7 @@ local-issues project delete '<项目>' --force    # 项目里还有议题时必�
 - `issue list` 默认只看 open；项目里议题全部关闭时会明确提示「加 `--state all` 查看全部」，而不是只回「没有匹配的条目」。
 - 跨项目列出时，每行多一列项目名（`--json` 中为 `project` 字段），因为编号只在项目内唯一；带 `-P` 或直接传链接时这一列省略。
 - 结果数量达到 `--limit`（默认 30）时会提示可能还有更多。
+- 评论不带 `--author` 也能发，但会在 stderr 收到醒目警告，说明这条记录会显示为「Agent」；补上 `--author <名字>` 就不会再提醒。
 - `--version` 显示插件与 API 版本；`local-issues issue --help` 只显示该组命令的用法，`--help` 显示全部。
 - 创建与评论默认作者是 `Agent`，多个 agent 同时操作时用 `--author <名字>` 区分来源。
 
