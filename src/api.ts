@@ -185,7 +185,7 @@ export async function startApi(options: ApiOptions): Promise<{ close: () => Prom
         send(res, 200, { ok: true, data: { html: renderMarkdown(str(body.body, 'body', false), { snapshot, routes, vaultName: options.vaultName,
           attachmentUrl, project: resolved?.kind === 'project' ? resolved.value : undefined, issue: resolved?.kind === 'issue' ? resolved.value : undefined }) } }); return;
       }
-      if (method === 'GET' && url.pathname === '/api/health') { send(res, 200, { ok: true, data: { name: 'Local Issues', version: '0.2.4' } }); return; }
+      if (method === 'GET' && url.pathname === '/api/health') { send(res, 200, { ok: true, data: { name: 'Local Issues', version: '0.2.5' } }); return; }
       if (method === 'GET' && url.pathname === '/api/attachments') {
         const path = attachmentPath(url.searchParams.get('path') ?? '');
         if (!path || !options.readAttachment) throw new HttpError(404, '附件不存在。', 'NOT_FOUND');
