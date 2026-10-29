@@ -190,7 +190,9 @@ export class IssuesView extends ItemView {
     select(tools, [['updated', '最近更新'], ['title', '项目名称'], ['due', '截止日期']], this.sort, value => { this.sort = value; safe(() => this.draw()); });
     select(tools, [['', '不分组'], ['status', '按状态分组']], this.group, value => { this.group = value; safe(() => this.draw()); });
     this.fieldsButton(tools, this.projectFields, [['progress', '进度'], ['count', 'Issues 数'], ['status', '状态'], ['due', '截止日期']]);
-    const projects = this.data.projects.filter(p => (!this.state || p.status === this.state) && `${p.title} ${p.description}`.toLowerCase().includes(this.query.toLowerCase())).sort((a, b) => this.sort === 'title' ? a.title.localeCompare(b.title) : this.sort === 'due' ? (a.dueDate || '9999').localeCompare(b.dueDate || '9999') : b.updatedAt.localeCompare(a.updatedAt));
+    const matching = this.data.projects.filter(p => `${p.title} ${p.description}`.toLowerCase().includes(this.query.toLowerCase()));
+    const archived = matching.filter(p => p.status === 'archived');
+    const projects = matching.filter(p => p.status !== 'archived' && (!this.state || p.status === this.state)).sort((a, b) => this.sort === 'title' ? a.title.localeCompare(b.title) : this.sort === 'due' ? (a.dueDate || '9999').localeCompare(b.dueDate || '9999') : b.updatedAt.localeCompare(a.updatedAt));
     if (this.group === 'status') projects.sort((a, b) => PROJECT_STATES.indexOf(a.status) - PROJECT_STATES.indexOf(b.status));
     if (!this.data.projects.length) { const empty = el(root, 'div', 'li-empty'); setIcon(el(empty, 'div', 'li-empty-icon'), 'folders'); el(empty, 'h3', '', '把想法变成项目'); el(empty, 'p', 'li-muted', '为每个项目记录 Issues、讨论和进度，所有内容保存在本地 Markdown 中。'); action(empty, '创建第一个项目', () => this.projectModal(), 'mod-cta', 'plus'); return; }
     const table = el(root, 'table', 'li-table li-projects'); const tr = el(el(table, 'thead'), 'tr'); for (const name of ['项目', '进度', 'Issues', '状态', '截止', '']) el(tr, 'th', '', name); const body = el(table, 'tbody');
@@ -201,8 +203,53 @@ export class IssuesView extends ItemView {
       el(row, 'td', '', `${done}/${issues.length}`); pill(el(row, 'td'), project.status); el(row, 'td', 'li-muted', project.dueDate || '—'); action(el(row, 'td'), '编辑', () => this.projectModal(project), 'li-subtle');
     }
     this.hideColumns(table, ['', 'progress', 'count', 'status', 'due', ''], this.projectFields);
-    if (!projects.length) el(root, 'p', 'li-empty', '没有匹配的项目。');
+    if (!projects.length) el(root, 'p', 'li-empty', archived.length ? '没有进行中的项目，已归档的在下方。' : '没有匹配的项目。');
+    this.renderArchived(root, archived);
   }
+  /** Archived projects leave the working list; they live in one collapsible strip with revive and delete. */
+  private renderArchived(root: HTMLElement, projects: Project[]) {
+    if (!projects.length) return;
+    const box = el(root, 'details', 'li-archived');
+    box.open = this.state === 'archived';
+    el(box, 'summary', '', `已归档 · ${projects.length} 个项目`);
+    for (const project of projects) {
+      const row = el(box, 'div', 'li-archived-row');
+      const info = el(row, 'div', 'li-archived-info');
+      action(info, project.title, () => safe(() => this.navigate(project.id)), 'li-project-title');
+      const issues = this.data.issues.filter(i => i.projectId === project.id);
+      el(info, 'span', 'li-muted', `${issues.filter(i => i.status !== 'closed').length} 个开启 · ${issues.length} 个议题`);
+      const actions = el(row, 'div', 'li-archived-actions');
+      action(actions, '启用', () => safe(async () => {
+        await this.host.store.updateProject(project.id, { status: 'active' }, project.revision ?? project.updatedAt);
+        new Notice(`已启用「${project.title}」`);
+        await this.draw();
+      }), 'li-subtle', 'rotate-ccw');
+      action(actions, '删除', () => this.deleteProject(project), 'li-subtle', 'trash-2');
+    }
+  }
+  private deleteProject(project: Project) {
+    const issues = this.data.issues.filter(i => i.projectId === project.id);
+    const modal = this.modal(`删除项目「${project.title}」？`);
+    modal.modalEl.addClass('li-delete-dialog');
+    el(modal.contentEl, 'p', 'li-muted', `项目里的 ${issues.length} 条议题、评论和附件会一起移入系统废纸篓，可以从回收站找回。笔记本体不会被改写。`);
+    const status = el(modal.contentEl, 'p', 'li-delete-status'); status.setAttribute('role', 'status');
+    const buttons = el(modal.modalEl, 'div', 'li-modal-actions');
+    const cancel = action(buttons, '取消', () => modal.close());
+    const confirm = action(buttons, '移入废纸篓', () => safe(async () => {
+      if (confirm.disabled) return;
+      confirm.disabled = true; cancel.disabled = true; confirm.textContent = '正在删除…'; status.removeClass('is-error'); status.textContent = '正在把项目移入废纸篓…';
+      try { await this.host.store.deleteProject(project.id, true); }
+      catch (error) {
+        status.addClass('is-error'); status.textContent = `删除失败：${error instanceof Error ? error.message : String(error)}`;
+        confirm.disabled = false; cancel.disabled = false; confirm.textContent = '重试删除';
+        return;
+      }
+      modal.close(); new Notice(`项目「${project.title}」已移入废纸篓`);
+      if (this.projectId === project.id) await this.navigate(); else await this.draw();
+    }), 'mod-warning');
+    modal.open(); cancel.focus();
+  }
+
   private renderProject(root: HTMLElement, project: Project) {
     const head = el(root, 'div', 'li-heading'); this.shareContextMenu(head, project.id, '项目'); el(head, 'h2', '', project.title); pill(head, project.status);
     const actions = el(head, 'div', 'li-heading-actions');

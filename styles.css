@@ -161,6 +161,11 @@ body:has(.li-no-tooltips:hover) .tooltip,
 .local-issues .li-editor-preview { padding: 12px 16px; min-height: 4.8em; max-height: 55dvh; overflow-y: auto; overflow-wrap: anywhere; }
 .local-issues .li-editor-preview img { max-width: min(100%, 480px); max-height: 280px; width: auto; height: auto; object-fit: contain; }
 .local-issues .li-editor-preview .image-embed { max-width: 100%; }
+.local-issues .li-archived { margin-top: 24px; border-top: 1px solid var(--background-modifier-border); padding-top: 8px; }
+.local-issues .li-archived summary { cursor: pointer; color: var(--text-muted); font-size: var(--font-ui-small); }
+.local-issues .li-archived-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 8px 0; border-bottom: 1px solid var(--background-modifier-border); }
+.local-issues .li-archived-info { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; min-width: 0; flex: 1; }
+.local-issues .li-archived-actions { display: flex; gap: 6px; }
 .li-delete-dialog .li-delete-excerpt { margin-top: 12px; overflow-wrap: anywhere; }
 .li-delete-dialog .li-delete-status:not(:empty) { margin-top: 12px; color: var(--text-muted); }
 .li-delete-dialog .li-delete-status.is-error { color: var(--text-error); }

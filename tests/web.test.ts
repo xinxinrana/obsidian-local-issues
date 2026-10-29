@@ -47,6 +47,32 @@ test('browser links render projects, default-open lists, filters, board, table a
   } finally { await f.close(); }
 });
 
+test('archived projects leave the working list for a strip that can revive or delete them', async () => {
+  const f = await fixture();
+  try {
+    const live = await f.store.createProject({ title: '进行中', description: '' });
+    const gone = await f.store.createProject({ title: '归档了', description: '', status: 'archived' });
+    const page = async () => new JSDOM(await (await fetch(new URL('/', f.url), { headers: browser })).text()).window.document;
+    const doc = await page();
+    assert.deepEqual([...doc.querySelectorAll('.rows > .row .title')].map(a => a.textContent), ['进行中'], '归档项目不在主列表');
+    const strip = doc.querySelector('details.archived-projects');
+    assert.ok(strip, '归档项目单独成段');
+    assert.match(strip!.querySelector('summary')!.textContent!, /已归档 · 1 个项目/);
+    assert.equal(strip!.querySelector('.archived-row .title')?.textContent, '归档了');
+    assert.equal(strip!.querySelector('[data-project-status]')?.getAttribute('data-project-status'), gone.id, '提供启用入口');
+    assert.equal(strip!.querySelector('[data-delete-project]')?.getAttribute('data-delete-project'), gone.id, '提供删除入口');
+    await f.request(`/api/projects/${gone.id}`, 'PATCH', { status: 'active' });
+    const revived = await page();
+    assert.equal(revived.querySelector('details.archived-projects'), null, '启用后归档段消失');
+    assert.deepEqual([...revived.querySelectorAll('.rows > .row .title')].map(a => a.textContent).sort(), ['进行中', '归档了'].sort());
+    await f.request(`/api/projects/${gone.id}`, 'PATCH', { status: 'archived' });
+    const removed = await (await fetch(new URL(`/api/projects/${gone.id}?force=1`, f.url), { method: 'DELETE' })).json();
+    assert.equal(removed.data.deleted, true);
+    assert.equal((await page()).querySelector('details.archived-projects'), null, '删除后归档段消失');
+    assert.ok(live);
+  } finally { await f.close(); }
+});
+
 test('HTML escapes executable content and legacy shares retain their narrow view', async () => {
   const f = await fixture();
   try {

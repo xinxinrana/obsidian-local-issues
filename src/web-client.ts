@@ -171,6 +171,27 @@ export function startWebClient(services?: { request?: typeof fetch; navigate?: (
     } catch (error) { feedback(host, error instanceof Error ? error.message : '删除失败，请重试。', true); }
     finally { working--; busy.delete(button); button.disabled = false; }
   }
+  async function restoreProject(button: HTMLButtonElement): Promise<void> {
+    if (busy.has(button) || working) return;
+    busy.add(button); button.disabled = true; working++;
+    feedback(button.closest<HTMLElement>('.archived-row')!, '正在启用…');
+    try {
+      await api(`/api/projects/${encodeURIComponent(button.dataset.projectStatus!)}`, 'PATCH', { status: 'active', actor: author });
+      leaving = true; navigate(location.pathname);
+    } catch (error) { feedback(button.closest<HTMLElement>('.archived-row')!, error instanceof Error ? error.message : '启用失败。', true); }
+    finally { working--; busy.delete(button); button.disabled = false; }
+  }
+  async function removeProject(button: HTMLButtonElement): Promise<void> {
+    if (busy.has(button) || working) return;
+    if (!window.confirm('项目会连同议题、评论和附件一起移入系统废纸篓，可以从回收站找回。确定删除吗？')) return;
+    busy.add(button); button.disabled = true; working++;
+    feedback(button.closest<HTMLElement>('.archived-row')!, '正在删除…');
+    try {
+      await api(`/api/projects/${encodeURIComponent(button.dataset.deleteProject!)}?force=1`, 'DELETE', {});
+      leaving = true; navigate(location.pathname);
+    } catch (error) { feedback(button.closest<HTMLElement>('.archived-row')!, error instanceof Error ? error.message : '删除失败，请重试。', true); }
+    finally { working--; busy.delete(button); button.disabled = false; }
+  }
   const boxes = () => [...root.querySelectorAll<HTMLInputElement>('input[data-select-issue]')];
   async function refreshSelected(button: HTMLButtonElement): Promise<void> {
     if (working) return;
@@ -243,6 +264,8 @@ export function startWebClient(services?: { request?: typeof fetch; navigate?: (
       closeEditor();
     } else if (el.dataset.tab) void preview(el as HTMLButtonElement);
     else if (el.dataset.delete) void removeComment(el as HTMLButtonElement);
+    else if (el.dataset.projectStatus) void restoreProject(el as HTMLButtonElement);
+    else if (el.dataset.deleteProject) void removeProject(el as HTMLButtonElement);
     else if (el.dataset.batchAction) void batch(el as HTMLButtonElement);
     else if (el.hasAttribute('data-refresh-selected')) void refreshSelected(el as HTMLButtonElement);
     else if (el.dataset.copy) {

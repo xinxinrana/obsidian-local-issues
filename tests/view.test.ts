@@ -453,5 +453,21 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     filteredSearch.value = '批量甲'; filteredSearch.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     await until(() => /已选择 1 项/.test(view.contentEl.querySelector('.li-batch')?.textContent || ''), '筛选变化清掉隐藏选择');
     click('看板'); await until(() => !!view.contentEl.querySelector('.li-board'), '切换看板'); assert.ok(!view.contentEl.querySelector('.li-batch'), '看板不显示无法勾选的批量栏');
+    await store.updateProject(project.id, { status: 'archived' });
+    await view.navigate();
+    await until(() => !!view.contentEl.querySelector('.li-archived-row'), '归档项目移出列表并单独显示');
+    assert.equal(view.contentEl.querySelectorAll('.li-projects tbody tr').length, 0, '项目列表不再混入归档项目');
+    assert.match(view.contentEl.querySelector('.li-archived summary')!.textContent!, /已归档 · 1 个项目/);
+    click('启用', view.contentEl);
+    await until(async () => (await store.snapshot()).projects[0].status === 'active', '归档项目可以启用');
+    assert.ok(view.contentEl.querySelector('.li-projects tbody tr'), '启用后回到项目列表');
+    await store.updateProject(project.id, { status: 'archived' });
+    await view.navigate();
+    await until(() => !!view.contentEl.querySelector('.li-archived-row'), '再次归档');
+    click('删除', view.contentEl);
+    const deleting = mock.modals.at(-1)!; assert.match(deleting.contentEl.textContent!, /移入系统废纸篓/);
+    click('移入废纸篓', deleting.modalEl);
+    await until(async () => (await store.snapshot()).projects.length === 0, '归档项目可以直接删除');
+    assert.ok(!view.contentEl.querySelector('.li-archived-row'), '删除后归档区消失');
   } finally { for (const modal of [...mock.modals]) modal.close(); await view.onClose(); dom.window.close(); }
 });
