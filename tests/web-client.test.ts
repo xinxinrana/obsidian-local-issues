@@ -12,7 +12,7 @@ async function waitFor(check: () => boolean, message = 'operation did not comple
   for (let i = 0; i < 200; i++) { if (check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
   assert.fail(message);
 }
-async function page(f: Awaited<ReturnType<typeof fixture>>, path: string) {
+async function page(f: Awaited<ReturnType<typeof fixture>>, path: string, live = false) {
   const response = await fetch(new URL(path, f.url), { headers: browser });
   assert.equal(response.status, 200);
   const dom = new JSDOM(await response.text(), { url: new URL(path, f.url).href, runScripts: 'outside-only', pretendToBeVisual: true });
@@ -25,6 +25,12 @@ async function page(f: Awaited<ReturnType<typeof fixture>>, path: string) {
   } };
   Object.assign(w, { __services: services, AbortController, CSS: { escape: (value: string) => value.replace(/[^\w-]/g, '\\$&') } });
   w.confirm = message => { confirmations.push(message || ''); return accept; };
+  if (live) {
+    w.Range.prototype.getClientRects = () => [] as any;
+    w.Range.prototype.getBoundingClientRect = () => ({ left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0 } as DOMRect);
+    const editorScript = await fetch(`${f.url}/api/markdown-editor.js`, { headers: { 'Sec-Fetch-Site': 'same-origin' } });
+    assert.equal(editorScript.status, 200); w.eval(await editorScript.text());
+  }
   const script = await fetch(`${f.url}/api/web-client.js`, { headers: { 'Sec-Fetch-Site': 'same-origin' } });
   assert.equal(script.status, 200);
   // Execute the exact client served by the API, including the production function serialization.
@@ -201,4 +207,37 @@ test('same-origin JSON writes require browser intent; CLI download and llms disc
     const { stdout } = await promisify(execFile)(process.execPath, [path, '--url', f.url, 'view', f.url, '--json']); assert.equal(JSON.parse(stdout).projects[0].id, created.data.id);
     assert.equal(await readFile(path, 'utf8'), await readFile('cli.mjs', 'utf8'));
   } finally { await f.close(); }
+});
+
+
+test('served shared editor keeps form payload, source selection, undo and conflict drafts consistent', async () => {
+  const f = await fixture(); let p: Awaited<ReturnType<typeof page>> | undefined;
+  try {
+    const project = await f.store.createProject({ title: 'Live' });
+    const issue = await f.store.createIssue(project.id, { title: 'One', body: '# 标题\n- [ ] 任务\n正文' });
+    p = await page(f, '/live/issues/1', true);
+    const form = p.edit('[data-edit="issue-body"]');
+    const content = form.querySelector('.cm-content') as any;
+    const editor = content.cmTile.root.view;
+    p.set(form, 'body', '中文草稿');
+    editor.dispatch({ selection: { anchor: 0, head: 4 } });
+    content.dispatchEvent(new p.w.KeyboardEvent('keydown', { key: 'b', ctrlKey: true, bubbles: true, cancelable: true }));
+    assert.equal(form.querySelector('textarea')!.value, '**中文草稿**');
+    const selection = editor.state.selection.toJSON();
+    p.click('.editing [aria-label="源码（Cmd/Ctrl+/）"]');
+    assert.equal(form.querySelector('.li-live-editor')!.getAttribute('data-mode'), 'source');
+    assert.deepEqual(editor.state.selection.toJSON(), selection);
+    p.click('.editing [aria-label="源码（Cmd/Ctrl+/）"]');
+    content.dispatchEvent(new p.w.KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true }));
+    assert.equal(form.querySelector('textarea')!.value, '中文草稿');
+    await f.store.updateIssue(issue.id, { body: '外部修改' });
+    p.submit(form);
+    assert.equal(content.getAttribute('contenteditable'), 'false', '保存时禁止继续编辑造成草稿丢失');
+    await waitFor(() => !!form.querySelector('[role=alert]'));
+    assert.equal(content.getAttribute('contenteditable'), 'true');
+    assert.equal(form.querySelector('textarea')!.value, '中文草稿');
+    assert.equal((await f.store.getIssue(issue.id)).body, '外部修改');
+    p.accept = true; p.click('[data-cancel]');
+    assert.equal(form.querySelector('.cm-editor'), null, '关闭原位编辑释放 CodeMirror');
+  } finally { p?.close(); await f.close(); }
 });

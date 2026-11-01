@@ -28,6 +28,8 @@ Alternatively, place `main.js`, `manifest.json` and `styles.css` from the same r
 
 Open the ribbon button **Local Issues：项目**, or run **Local Issues：打开项目** in the command palette. Create a project, then create its first issue. The **更多** menus contain note and sharing actions. In the issue editor, expand **属性与关联** to set labels, milestones, assignees and relationships.
 
+Project descriptions, issue bodies and comments share a live Markdown editor in Obsidian and the browser. Headings, quotes, task items, inline formatting and local images render in place. Use `Cmd/Ctrl+B` for bold, `Cmd/Ctrl+I` for italic, `Cmd/Ctrl+K` for a link, and `Cmd/Ctrl+/` for source mode. Switching modes preserves selection and undo history. `Tab` and `Shift+Tab` indent lists and otherwise keep normal focus navigation. `Cmd/Ctrl+Enter` submits; `Cmd/Ctrl+Shift+U` selects attachments. Tables remain editable as source. Create a project before adding attachments.
+
 ## Agent CLI
 
 The CLI requires Node.js 22+ and a running desktop Obsidian instance with Local Issues enabled.

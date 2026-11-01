@@ -19,4 +19,4 @@ jobs:
       - run: npm run build
       - run: npm test
       - name: Verify committed build assets
-        run: git diff --exit-code -- main.js cli.mjs
+        run: git diff --exit-code -- main.js cli.mjs src/markdown-editor-bundle.json

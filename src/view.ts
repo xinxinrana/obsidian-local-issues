@@ -1,5 +1,5 @@
-import { Component, ItemView, MarkdownRenderer, Modal, Notice, Menu, setIcon, WorkspaceLeaf, type ViewStateResult } from 'obsidian';
-import { createLiveMarkdown } from './live-markdown';
+import { Platform, Component, ItemView, MarkdownRenderer, Modal, Notice, Menu, setIcon, WorkspaceLeaf, type ViewStateResult } from 'obsidian';
+import { createLiveMarkdown, MARKDOWN_TOOLS } from './live-markdown';
 import { suppressTooltips } from './tooltips';
 import { ISSUE_STATUSES, STATUS_NAMES, CLOSE_REASON_NAMES, issueLink, CloseReason, Issue, IssueInput, IssuePatch, IssueStore, Project, ProjectStatus, Snapshot, TimelineEntry } from './types';
 
@@ -542,7 +542,8 @@ export class IssuesView extends ItemView {
   private field(parent: HTMLElement, label: string) { const field = el(parent, 'div', 'li-field'); el(field, 'label', '', label); return field; }
   private projectModal(project?: Project) {
     const modal = this.modal(project ? '编辑项目' : '新建项目'); const title = input(this.field(modal.contentEl, '项目名称'), '项目名称', project?.title); title.required = true;
-    const description = el(this.field(modal.contentEl, '项目说明 · Markdown'), 'textarea', 'li-textarea'); description.value = project?.description || ''; description.rows = 5; labelControl(description, '项目说明');
+    const description = this.editor(this.field(modal.contentEl, '项目说明 · Markdown'), project?.description || '', project?.id || '', project?.path || '');
+    modal.onClose = () => description.destroy();
     let status: ProjectStatus = project?.status || 'active'; select(this.field(modal.contentEl, '状态'), PROJECT_STATES.map(s => [s, STATUS_NAMES[s]]), status, value => { status = value as ProjectStatus; }); const due = input(this.field(modal.contentEl, '截止日期'), '', project?.dueDate); due.type = 'date';
     this.saveButton(modal, async () => { if (!title.value.trim()) throw new Error('请输入项目名称'); const data = { title: title.value.trim(), description: description.value, status, dueDate: due.value }; const saved = project ? await this.host.store.updateProject(project.id, data, project.revision ?? project.updatedAt) : await this.host.store.createProject(data); modal.close(); await this.navigate(saved.id); }); modal.open(); title.focus();
   }
@@ -603,7 +604,10 @@ export class IssuesView extends ItemView {
     const preview = el(container, 'div', 'li-editor-preview markdown-rendered'); preview.hidden = true;
     const footer = el(container, 'div', 'li-editor-footer');
     let disposed = false, uploads = 0;
-    const view = createLiveMarkdown(this.app, liveContainer, initial, sourcePath, value => changed?.(value));
+    const view = createLiveMarkdown(this.app, liveContainer, initial, sourcePath, value => changed?.(value), {
+      onSubmit: () => { if (!uploads) (actions.querySelector<HTMLButtonElement>('.mod-cta') || container.closest('.li-create')?.querySelector<HTMLButtonElement>('.li-inline-actions .mod-cta') || container.closest('.modal')?.querySelector<HTMLButtonElement>('.li-modal-actions .mod-cta'))?.click(); },
+      onAttach: () => { if (ref) picker.click(); else new Notice('请先创建项目，再添加附件'); },
+    });
     const destroy = () => { if (!disposed) { disposed = true; view.destroy(); } };
     this.renderScope.register(destroy);
     const getValue = () => view.state.doc.toString();
@@ -612,9 +616,19 @@ export class IssuesView extends ItemView {
     const write = action(tools, '编写', () => { liveContainer.hidden = false; preview.hidden = true; write.addClass('is-active'); previewButton.removeClass('is-active'); focus(); });
     const previewButton = action(tools, '预览', () => { liveContainer.hidden = true; preview.hidden = false; preview.replaceChildren(); safe(() => MarkdownRenderer.render(this.app, getValue() || '*暂无内容*', preview, sourcePath, this.renderScope)); write.removeClass('is-active'); previewButton.addClass('is-active'); });
     write.addClass('is-active');
+    for (const [command, label, shortcut] of MARKDOWN_TOOLS) {
+      const button = action(tools, label, () => { liveContainer.hidden = false; preview.hidden = true; write.addClass('is-active'); previewButton.removeClass('is-active'); view.command(command); });
+      button.setAttribute('aria-label', shortcut ? `${label}（${shortcut}）` : label);
+      if (shortcut) el(button, 'kbd', '', shortcut.replace('Cmd/Ctrl+', Platform.isMacOS ? '⌘' : 'Ctrl+'));
+      button.addEventListener('mousedown', event => event.preventDefault());
+      if (command === 'source') { const update = () => { button.setAttribute('aria-pressed', String(liveContainer.dataset.mode === 'source')); }; liveContainer.addEventListener('markdown-mode', update); update(); }
+    }
+    const picker = el(footer, 'input'); picker.type = 'file'; picker.multiple = true; picker.hidden = true; picker.setAttribute('aria-label', '选择附件');
     const uploadStatus = el(footer, 'span', 'li-upload-status li-muted'); uploadStatus.setAttribute('aria-live', 'polite');
     const actions = el(footer, 'div', 'li-editor-actions');
     const attach = async (list: File[]) => { uploads++; container.dataset.uploading = 'true'; uploadStatus.textContent = '正在保存附件…'; try { for (const file of list) { const saved = await this.host.store.attach(ref, file.name, new Uint8Array(await file.arrayBuffer())); if (!disposed) insert(`\n${saved.markdown}\n`); } } finally { if (--uploads === 0) { delete container.dataset.uploading; uploadStatus.textContent = ''; } } };
+    picker.addEventListener('change', () => { const list = [...(picker.files || [])]; picker.value = ''; if (list.length) safe(() => attach(list)); });
+    const attachButton = action(tools, '附件 Cmd/Ctrl+Shift+U', () => { if (ref) picker.click(); else new Notice('请先创建项目，再添加附件'); }); attachButton.disabled = !ref;
     view.contentDOM.addEventListener('paste', event => { const list = [...(event.clipboardData?.files || [])]; if (!list.length) return; event.preventDefault(); safe(() => attach(list)); }, true);
     container.addEventListener('dragover', event => { if (event.dataTransfer?.types.includes('Files')) { event.preventDefault(); container.addClass('is-dragover'); } }); container.addEventListener('dragleave', () => container.removeClass('is-dragover')); container.addEventListener('drop', event => { container.removeClass('is-dragover'); const list = [...(event.dataTransfer?.files || [])]; if (!list.length) return; event.preventDefault(); safe(() => attach(list)); });
     return { element: container, get value() { return getValue(); }, get uploading() { return uploads > 0; }, actions, focus, destroy, clear: () => { if (!disposed) view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: '' } }); } };

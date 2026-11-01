@@ -151,6 +151,7 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
 
   openSettings(): void {
     const modal = new Modal(this.app);
+    modal.modalEl.addClass('li-settings');
     suppressTooltips(modal.modalEl);
     modal.setTitle('Local Issues 设置');
     const tab = new LocalIssuesSettings(this.app, this);
@@ -325,6 +326,7 @@ class LocalIssuesSettings extends PluginSettingTab {
   constructor(app: App, private plugin: LocalIssuesPlugin) { super(app, plugin); }
   display(): void {
     const { containerEl: el, plugin: p } = this; el.empty(); suppressTooltips(el);
+    el.addClass('li-settings');
     new Setting(el).setName('打开项目').setDesc('项目、Issues、评论和看板。').addButton(b => b.setButtonText('打开').setCta().onClick(() => p.activate()));
     new Setting(el).setName('显示名称').setDesc('新建 Issue、评论和状态记录的默认作者。').addText(t => t.setValue(p.settings.author).onChange(async value => {
       p.settings.author = value.trim() || '我'; p.store.author = p.settings.author; await p.saveSettings();

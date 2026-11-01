@@ -257,8 +257,14 @@ body:has(.li-no-tooltips:hover) .tooltip,
 .local-issues .li-editing { scroll-margin-block: 80px; }
 .local-issues .li-comment:has(.li-editing) { border-color: var(--interactive-accent); }
 
+.li-settings { scrollbar-width: none; }
+.li-settings::-webkit-scrollbar { display: none; }
+
 .li-cli-progress { margin: 0 0 16px; }
 .li-cli-progress p { margin: 6px 0; overflow-wrap: anywhere; }
 .li-cli-step { font-size: var(--font-ui-small); color: var(--text-muted); }
 .li-cli-step.is-error { color: var(--text-error); }
 .li-cli-step.is-running, .li-cli-result { color: var(--text-normal); }
+
+.local-issues .li-editor-toolbar kbd { font-size: 10px; margin-inline-start: 4px; opacity: .7; }
+.local-issues .li-editor-toolbar [aria-pressed="true"] { background: var(--background-modifier-hover); color: var(--text-normal); }

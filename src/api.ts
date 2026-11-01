@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { createHmac, randomBytes } from 'node:crypto';
 import { ResourceRoutes, parseResource, slug } from './routes';
 import { attachmentPath, attachmentReferences, escapeHtml, htmlDocument, renderMarkdown, renderPage } from './web';
+import editorScript from './markdown-editor-bundle.json';
 import { startWebClient } from './web-client';
 import { agentGuide, agentSkill } from './agent-skill';
 import type { Issue, IssuePatch, IssueStore, ProjectPatch, Resolved, Snapshot } from './types';
@@ -127,7 +128,8 @@ export async function startApi(options: ApiOptions): Promise<{ close: () => Prom
     if (!/^[A-Za-z0-9+/]*={0,2}$/.test(base64) || base64.length % 4 !== 0) throw new HttpError(400, '附件必须是有效 base64。');
     const bytes = Buffer.from(base64, 'base64');
     if (bytes.length > 16 * 1024 * 1024) throw new HttpError(413, '单次附件最大 16 MB。', 'TOO_LARGE');
-    return store.attach(ref, name, bytes);
+    const saved = await store.attach(ref, name, bytes);
+    return { ...saved, url: attachmentUrl(ref, saved.path) };
   }
   async function detail(ref: string, project?: string): Promise<Record<string, unknown>> {
     return issueDetail(await store.getIssue(ref, project), await store.snapshot());
@@ -163,15 +165,15 @@ export async function startApi(options: ApiOptions): Promise<{ close: () => Prom
       const origin = `http://${host}`;
       const webRequest = req.headers['x-local-issues'] === 'web' && req.headers['sec-fetch-site'] === 'same-origin' &&
         (method === 'GET' ? !req.headers.origin || req.headers.origin === origin : req.headers.origin === origin && /^application\/json(?:;|$)/i.test(req.headers['content-type'] || ''));
-      const browserRead = browserHtml || (method === 'GET' && ['/api/attachments', '/api/web-client.js', '/api/cli.mjs', '/llms.txt'].includes(url.pathname));
+      const browserRead = browserHtml || (method === 'GET' && ['/api/attachments', '/api/web-client.js', '/api/markdown-editor.js', '/api/cli.mjs', '/llms.txt'].includes(url.pathname));
       if (!webRequest && ((req.headers.origin && (!browserRead || req.headers.origin !== origin)) ||
         (req.headers['sec-fetch-site'] && req.headers['sec-fetch-site'] !== 'none' && !(browserRead && req.headers['sec-fetch-site'] === 'same-origin')))) {
         throw new HttpError(403, '只允许本机 CLI 或同源页面读取。', 'FORBIDDEN');
       }
-      if (method === 'GET' && ['/api/web-client.js', '/api/cli.mjs', '/llms.txt'].includes(url.pathname)) {
+      if (method === 'GET' && ['/api/web-client.js', '/api/markdown-editor.js', '/api/cli.mjs', '/llms.txt'].includes(url.pathname)) {
         const cli = url.pathname === '/api/cli.mjs';
         if (cli && !options.readCli) throw new HttpError(404, '请将 cli.mjs 放入插件目录。', 'NOT_FOUND');
-        const text = cli ? await options.readCli!() : url.pathname === '/llms.txt' ? agentGuide(skillOptions()) : `(${startWebClient.toString()})();`;
+        const text = url.pathname === '/api/markdown-editor.js' ? editorScript.script : cli ? await options.readCli!() : url.pathname === '/llms.txt' ? agentGuide(skillOptions()) : `(${startWebClient.toString()})();`;
         res.writeHead(200, { 'Content-Type': url.pathname === '/llms.txt' ? 'text/markdown; charset=utf-8' : 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store',
           'X-Content-Type-Options': 'nosniff', 'Cross-Origin-Resource-Policy': 'same-origin', ...(cli ? { 'Content-Disposition': 'attachment; filename="cli.mjs"' } : {}) });
         res.end(text); return;

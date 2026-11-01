@@ -66,7 +66,7 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     click('创建第一个项目'); let modal = mock.modals.at(-1); assertFooter(modal);
     assert.ok(modal.modalEl.classList.contains('li-no-tooltips'));
     fill(modal.contentEl.querySelector('input[placeholder="项目名称"]'), '界面项目');
-    fill(modal.contentEl.querySelector('textarea'), '项目正文 [[Reference]]'); click('保存', modal.modalEl);
+    fill(modal.contentEl.querySelector('.cm-content'), '项目正文 [[Reference]]'); modal.contentEl.querySelector('.cm-content').dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }));
     await until(async () => (await store.snapshot()).projects.length === 1 && !mock.modals.length && !!view.contentEl.querySelector('input[aria-label="搜索 Issues"]'), '创建项目');
     const project = (await store.snapshot()).projects[0];
     assert.deepEqual([...view.contentEl.querySelectorAll('.li-tabs .li-icon')].map(icon => icon.dataset.icon), ['circle-dot', 'columns-3', 'table']);

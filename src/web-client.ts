@@ -1,3 +1,4 @@
+import type { createMarkdownEditor, MARKDOWN_TOOLS } from './markdown-editor';
 // Self-contained: the bundled function is served as a same-origin browser script.
 export function startWebClient(services?: { request?: typeof fetch; navigate?: (url: string) => void }): void {
   const root = document.querySelector<HTMLElement>('#li-app');
@@ -12,6 +13,9 @@ export function startWebClient(services?: { request?: typeof fetch; navigate?: (
   });
   const author = root.dataset.author || '我';
   let leaving = false, working = 0, active: HTMLFormElement | undefined;
+  const markdown = (window as unknown as { LocalIssuesMarkdown?: { createMarkdownEditor: typeof createMarkdownEditor; MARKDOWN_TOOLS: typeof MARKDOWN_TOOLS } }).LocalIssuesMarkdown;
+  const editors = new Map<HTMLTextAreaElement, ReturnType<typeof createMarkdownEditor>>();
+  const images = new Map<string, string>();
   const baselines = new WeakMap<HTMLFormElement, string>();
   const uploads = new WeakMap<HTMLFormElement, number>();
   const busy = new WeakSet<HTMLElement>();
@@ -44,13 +48,41 @@ export function startWebClient(services?: { request?: typeof fetch; navigate?: (
   function resize(textarea: HTMLTextAreaElement): void { textarea.style.removeProperty('height'); textarea.style.height = `${textarea.scrollHeight}px`; }
   function initialize(form: HTMLFormElement): void {
     baselines.set(form, values(form));
-    form.querySelectorAll('textarea').forEach(resize);
+    form.querySelectorAll<HTMLTextAreaElement>('textarea').forEach(textarea => {
+      resize(textarea);
+      if (!markdown || !textarea.hasAttribute('data-markdown') || editors.has(textarea)) return;
+      const parent = document.createElement('div'); parent.className = 'li-live-editor'; textarea.after(parent); textarea.hidden = true;
+      const editor = markdown.createMarkdownEditor(parent, textarea.value, value => { textarea.value = value; }, {
+        onSubmit: () => { void submit(form); },
+        onAttach: () => form.querySelector<HTMLInputElement>('input[type=file]')?.click(),
+        image: target => {
+          if (images.has(target)) return images.get(target);
+          if (!/^resource\/local-issues\/[^?#]+\.(png|jpe?g|gif|webp|bmp|avif)$/i.test(target) || !form.dataset.ref) return undefined;
+          return `/api/attachments?ref=${encodeURIComponent(form.dataset.ref)}&path=${encodeURIComponent(target)}`;
+        },
+      });
+      editors.set(textarea, editor);
+      textarea.addEventListener('input', () => { if (textarea.value !== editor.state.doc.toString()) editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: textarea.value } }); });
+      const tools = form.querySelector<HTMLElement>('.editor-tabs');
+      if (tools) {
+        tools.setAttribute('role', 'toolbar'); tools.setAttribute('aria-label', 'Markdown 格式'); tools.querySelectorAll('[data-tab]').forEach(button => button.removeAttribute('role'));
+        for (const [command, label, shortcut] of markdown.MARKDOWN_TOOLS) {
+          const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.setAttribute('aria-label', shortcut ? `${label}（${shortcut}）` : label);
+          if (shortcut) { const key = document.createElement('kbd'); key.textContent = shortcut.replace('Cmd/Ctrl+', navigator.platform?.includes('Mac') ? '⌘' : 'Ctrl+'); button.append(key); }
+          button.addEventListener('mousedown', event => event.preventDefault());
+          button.addEventListener('click', () => { form.querySelector<HTMLButtonElement>('[data-tab=write]')?.click(); editor.command(command); });
+          if (command === 'source') { const update = () => button.setAttribute('aria-pressed', String(parent.dataset.mode === 'source')); parent.addEventListener('markdown-mode', update); update(); }
+          tools.append(button);
+        }
+      }
+    });
   }
   forms().forEach(initialize);
   function closeEditor(): void {
     if (!active) return;
     const container = active.closest<HTMLElement>('[data-editable]')!;
     container.querySelector<HTMLElement>('[data-display]')?.removeAttribute('hidden');
+    for (const textarea of active.querySelectorAll('textarea')) { editors.get(textarea)?.destroy(); editors.delete(textarea); }
     container.classList.remove('editing'); active.remove(); active = undefined;
   }
   function openEditor(button: HTMLElement): void {
@@ -64,7 +96,8 @@ export function startWebClient(services?: { request?: typeof fetch; navigate?: (
     const form = fragment.querySelector<HTMLFormElement>('form')!;
     container.querySelector<HTMLElement>('[data-display]')?.setAttribute('hidden', '');
     container.append(fragment); container.classList.add('editing'); active = form; initialize(form);
-    form.querySelector<HTMLElement>('textarea,input:not([type=hidden]),select')?.focus();
+    const first = form.querySelector<HTMLElement>('textarea,input:not([type=hidden]),select');
+    if (first instanceof HTMLTextAreaElement && editors.has(first)) editors.get(first)!.focus(); else first?.focus();
     form.scrollIntoView?.({ block: 'nearest' });
   }
   function payload(form: HTMLFormElement): Record<string, unknown> {
@@ -86,6 +119,7 @@ export function startWebClient(services?: { request?: typeof fetch; navigate?: (
     const dataToSave = payload(form), fingerprint = values(form);
     const controls = [...form.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLButtonElement | HTMLSelectElement>('input,textarea,button,select')];
     const disabled = controls.map(c => c.disabled);
+    form.querySelectorAll('textarea').forEach(t => editors.get(t)?.setReadOnly(true));
     controls.forEach(c => c.disabled = true); feedback(form, '正在保存…');
     try {
       const data = await api(form.dataset.api!, form.dataset.method || 'POST', dataToSave, form.dataset.revision);
@@ -98,7 +132,7 @@ export function startWebClient(services?: { request?: typeof fetch; navigate?: (
       else if (form.dataset.anchor) destination += `#${form.dataset.anchor}`;
       leaving = true; navigate(destination);
     } catch (error) { feedback(form, error instanceof Error ? error.message : '保存失败，请重试。', true); }
-    finally { working--; busy.delete(form); controls.forEach((c, index) => c.disabled = disabled[index]); }
+    finally { working--; busy.delete(form); controls.forEach((c, index) => c.disabled = disabled[index]); form.querySelectorAll('textarea').forEach(t => editors.get(t)?.setReadOnly(false)); }
   }
   async function upload(form: HTMLFormElement, files: File[]): Promise<void> {
     const textarea = form.querySelector<HTMLTextAreaElement>('textarea[data-markdown]');
@@ -118,7 +152,10 @@ export function startWebClient(services?: { request?: typeof fetch; navigate?: (
         const data = await api(form.dataset.upload!, 'POST', { name: file.name, base64 });
         if (!form.isConnected) return;
         const insertion = `${textarea.value ? '\n\n' : ''}${data.markdown}\n`;
-        textarea.setRangeText(insertion, textarea.selectionStart, textarea.selectionEnd, 'end'); resize(textarea);
+        if (data.url) images.set(data.path, data.url);
+        const editor = editors.get(textarea);
+        if (editor) { const { from, to } = editor.state.selection.main; editor.dispatch({ changes: { from, to, insert: insertion }, selection: { anchor: from + insertion.length } }); editor.focus(); }
+        else { textarea.setRangeText(insertion, textarea.selectionStart, textarea.selectionEnd, 'end'); resize(textarea); }
       }
       feedback(form, '附件已插入，保存后生效。');
     } catch (error) { feedback(form, error instanceof Error ? error.message : '上传失败，请重试。', true); }
@@ -129,7 +166,7 @@ export function startWebClient(services?: { request?: typeof fetch; navigate?: (
     if (busy.has(button)) return;
     const textarea = form.querySelector<HTMLTextAreaElement>('textarea[data-markdown]')!;
     const output = form.querySelector<HTMLElement>('[data-preview]')!;
-    if (button.dataset.tab === 'write') { textarea.hidden = false; output.hidden = true; textarea.focus(); }
+    if (button.dataset.tab === 'write') { const editor = editors.get(textarea); textarea.hidden = !!editor; if (editor) { editor.dom.parentElement!.hidden = false; editor.focus(); } else textarea.focus(); output.hidden = true; }
     else {
       busy.add(button); button.disabled = true;
       try {
@@ -139,7 +176,7 @@ export function startWebClient(services?: { request?: typeof fetch; navigate?: (
         if (body !== textarea.value) { feedback(form, '内容已变化，请重新预览。'); return; }
         const parsed = new DOMParser().parseFromString(String(data.html), 'text/html');
         output.replaceChildren(...Array.from(parsed.body.childNodes, node => document.importNode(node, true)));
-        textarea.hidden = true; output.hidden = false;
+        textarea.hidden = true; const editor = editors.get(textarea); if (editor) editor.dom.parentElement!.hidden = true; output.hidden = false;
       } catch (error) { feedback(form, error instanceof Error ? error.message : '预览失败。', true); return; }
       finally { busy.delete(button); button.disabled = false; }
     }
@@ -327,5 +364,6 @@ export function startWebClient(services?: { request?: typeof fetch; navigate?: (
   root.addEventListener('dragstart', event => { const row = (event.target as Element).closest<HTMLElement>('[data-drag-issue]'); if (row) event.dataTransfer?.setData('application/x-local-issue', row.dataset.dragIssue!); });
   root.querySelectorAll<HTMLElement>('[data-drop-status]').forEach(column => column.addEventListener('dragover', event => { if ([...(event.dataTransfer?.types || [])].includes('application/x-local-issue')) event.preventDefault(); }));
   window.addEventListener('beforeunload', event => { if (!leaving && (working || dirtyOthers())) { event.preventDefault(); event.returnValue = ''; } });
+  window.addEventListener('pagehide', () => { for (const editor of editors.values()) editor.destroy(); editors.clear(); });
   selection();
 }

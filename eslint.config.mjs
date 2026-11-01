@@ -42,10 +42,11 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/web-client.ts'],
+    files: ['src/web-client.ts', 'src/markdown-editor.ts'],
     rules: {
       // Browser page script: Obsidian's createEl/setCssProps/instanceOf helpers do not exist here.
       'obsidianmd/prefer-create-el': 'off',
+      'obsidianmd/platform': 'off',
       'obsidianmd/prefer-instanceof': 'off',
       'obsidianmd/no-static-styles-assignment': 'error',
       'no-unsanitized/property': 'error',

@@ -85,7 +85,7 @@ test('HTML escapes executable content and legacy shares retain their narrow view
     assert.match(response.headers.get('content-security-policy')!, /default-src 'none'/);
     assert.equal(response.headers.get('x-frame-options'), 'DENY');
     const doc = new JSDOM(await response.text()).window.document;
-    assert.equal(doc.querySelectorAll('script:not([src="/api/web-client.js"]),iframe,svg,img,[onerror],[onload]').length, 0);
+    assert.equal(doc.querySelectorAll('script:not([src="/api/web-client.js"]):not([src="/api/markdown-editor.js"]),iframe,svg,img,[onerror],[onload]').length, 0);
     assert.ok([...doc.querySelectorAll('a')].every(a => !/^(?:javascript|data):/i.test(a.getAttribute('href')!)));
     assert.match(doc.querySelector('h1')!.textContent!, /<script>bad/);
     const share = await f.request('/api/shares', 'POST', { ref: issue.id });

@@ -99,7 +99,7 @@ class Setting {
   }
 }
 module.exports = { installDom, Component, ItemView, Modal, AbstractInputSuggest, Menu, Notice, MarkdownRenderer,
-  Plugin, PluginSettingTab, Setting, TFile, FileSystemAdapter,
+  Plugin, PluginSettingTab, Setting, TFile, FileSystemAdapter, Platform: { isMacOS: false },
   setIcon(el, icon) { el.dataset.icon = icon; el.setAttribute('aria-hidden', 'true'); },
   normalizePath: s => s.replace(/\\/g, '/').replace(/\/{2,}/g, '/'), modals, notices, menus,
 };
