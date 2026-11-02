@@ -68,7 +68,7 @@ export function startWebClient(services?: { request?: typeof fetch; navigate?: (
         tools.setAttribute('role', 'toolbar'); tools.setAttribute('aria-label', 'Markdown 格式'); tools.querySelectorAll('[data-tab]').forEach(button => button.removeAttribute('role'));
         for (const [command, label, shortcut] of markdown.MARKDOWN_TOOLS) {
           const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.setAttribute('aria-label', shortcut ? `${label}（${shortcut}）` : label);
-          if (shortcut) { const key = document.createElement('kbd'); key.textContent = shortcut.replace('Cmd/Ctrl+', navigator.platform?.includes('Mac') ? '⌘' : 'Ctrl+'); button.append(key); }
+          if (shortcut) { const key = document.createElement('kbd'); key.textContent = shortcut.replace('Cmd/Ctrl+', '⌘/Ctrl+'); button.append(key); }
           button.addEventListener('mousedown', event => event.preventDefault());
           button.addEventListener('click', () => { form.querySelector<HTMLButtonElement>('[data-tab=write]')?.click(); editor.command(command); });
           if (command === 'source') { const update = () => button.setAttribute('aria-pressed', String(parent.dataset.mode === 'source')); parent.addEventListener('markdown-mode', update); update(); }

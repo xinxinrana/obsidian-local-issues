@@ -30,6 +30,8 @@ async function page(f: Awaited<ReturnType<typeof fixture>>, path: string, live =
     w.Range.prototype.getBoundingClientRect = () => ({ left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0 } as DOMRect);
     const editorScript = await fetch(`${f.url}/api/markdown-editor.js`, { headers: { 'Sec-Fetch-Site': 'same-origin' } });
     assert.equal(editorScript.status, 200); w.eval(await editorScript.text());
+    // The page toolbar must work without OS detection after editor dependencies load.
+    Object.defineProperty(w.navigator, 'platform', { configurable: true, get: () => { throw new w.Error('网页工具栏不得读取 navigator.platform'); } });
   }
   const script = await fetch(`${f.url}/api/web-client.js`, { headers: { 'Sec-Fetch-Site': 'same-origin' } });
   assert.equal(script.status, 200);
@@ -217,6 +219,7 @@ test('served shared editor keeps form payload, source selection, undo and confli
     const issue = await f.store.createIssue(project.id, { title: 'One', body: '# 标题\n- [ ] 任务\n正文' });
     p = await page(f, '/live/issues/1', true);
     const form = p.edit('[data-edit="issue-body"]');
+    assert.equal(form.querySelector('[aria-label="加粗（Cmd/Ctrl+B）"] kbd')?.textContent, '⌘/Ctrl+B');
     const content = form.querySelector('.cm-content') as any;
     const editor = content.cmTile.root.view;
     p.set(form, 'body', '中文草稿');
