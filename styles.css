@@ -360,3 +360,6 @@ body:has(.li-no-tooltips:hover) .tooltip,
 .is-mobile .modal.li-settings-modal { position: fixed; top: calc(16px + env(safe-area-inset-top)); left: 8px; width: calc(100% - 16px); margin: 0; max-width: calc(100% - 16px); max-height: calc(var(--li-viewport-height,100dvh) - 32px); display: flex; flex-direction: column; overflow: hidden; }
 .is-mobile .li-settings-modal > .modal-content { min-height: 0; overflow-y: auto; }
 .is-mobile .li-settings :is(button,input,select) { min-height: 44px; font-size: 16px; }
+
+.is-mobile .local-issues .li-tappable { cursor: pointer; touch-action: manipulation; }
+.is-mobile .local-issues .li-tappable:active { background: var(--background-modifier-hover); }

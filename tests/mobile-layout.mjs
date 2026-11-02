@@ -47,8 +47,12 @@ try {
   assert.equal(await page.evaluate(() => scrollY), 0);
   await page.locator('.li-mobile-content').evaluate(el => { el.scrollTop = 0; });
   await page.screenshot({ scale: 'css', path: join(output, 'projects-iphone17.png') });
-  await page.getByRole('button', { name: '手机上的项目协作与本地议题', exact: true }).tap();
+  await page.locator('.li-project-card').filter({ has: page.getByRole('button', { name: '手机上的项目协作与本地议题', exact: true }) }).locator('.li-project-card-meta').tap();
   await page.locator('.li-state-tabs').waitFor(); await fits('议题列表');
+  await page.locator('.li-issue-row .li-touch-checkbox').first().tap();
+  assert.equal(await page.locator('.li-description').count(), 0, '勾选不应进入详情');
+  await page.locator('.li-issue-row .li-issue-meta').first().tap(); await page.locator('.li-description').waitFor();
+  await chrome.getByRole('button', { name: '返回', exact: true }).tap(); await page.locator('.li-state-tabs').waitFor();
   await setMode('board'); await page.locator('.li-board').waitFor(); await fits('单列看板');
   assert.equal(await page.locator('.li-board').evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length), 1);
   await setMode('table'); await page.locator('.li-issues-table').waitFor(); await fits('表格局部滚动');
