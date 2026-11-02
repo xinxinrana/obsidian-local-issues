@@ -18,9 +18,9 @@ test('bundled plugin registers native entry points; Vault adapter, protocol, API
   const changed = () => events.forEach(fn => fn());
   let injectExternalEdit = false;
   const vault = {
-    configDir: '.obsidian', getName: () => 'Tests', getMarkdownFiles: () => [...files.keys()].map(p => new mock.TFile(p)),
+    configDir: '.obsidian', getName: () => 'Tests', getMarkdownFiles: () => [...files.keys()].filter(path => path.endsWith('.md')).map(p => new mock.TFile(p)),
     getAbstractFileByPath: (p: string) => files.has(p) || binary.has(p) ? Object.assign(new mock.TFile(p), { stat: { size: binary.get(p)?.byteLength || files.get(p)?.length || 0 } }) : null,
-    adapter: { exists: async (p: string) => files.has(p) || folders.has(p) || binary.has(p), read: async (p: string) => { if (!files.has(p)) throw new Error('文件不存在'); return files.get(p)!; } },
+    adapter: { write: async (p: string, value: string) => { files.set(p, value); }, mkdir: async (p: string) => { folders.add(p); }, list: async (p: string) => ({ files: [...files.keys()].filter(path => path.startsWith(p + '/')), folders: [] }), exists: async (p: string) => files.has(p) || folders.has(p) || binary.has(p), read: async (p: string) => { if (!files.has(p)) throw new Error('文件不存在'); return files.get(p)!; } },
     read: async (f: { path: string }) => files.get(f.path)!,
     readBinary: async (f: { path: string }) => Uint8Array.from(binary.get(f.path)!).buffer,
     createFolder: async (p: string) => { folders.add(p); },

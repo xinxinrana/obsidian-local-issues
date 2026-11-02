@@ -8,7 +8,7 @@
     "build": "tsc --noEmit && node build.mjs",
     "test": "node --import jiti/register --test tests/*.test.ts",
     "lint": "eslint src",
-    "test:mobile": "node tests/mobile-layout.mjs"
+    "test:mobile": "node tests/mobile-layout.mjs && node tests/mobile-drafts.mjs"
   },
   "dependencies": {
     "@codemirror/commands": "^6.11.1",

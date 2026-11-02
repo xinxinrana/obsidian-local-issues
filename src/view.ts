@@ -7,7 +7,7 @@ import { Drafts, type DraftEditor } from './drafts';
 import { ISSUE_STATUSES, STATUS_NAMES, CLOSE_REASON_NAMES, issueLink, CloseReason, Issue, IssueInput, IssuePatch, IssueStore, Project, ProjectStatus, Snapshot, TimelineEntry } from './types';
 
 export const VIEW_TYPE = 'local-issues-view';
-export interface ViewHost { store: IssueStore; author: string; openNote(path: string): Promise<void>; resourceLink(ref?: string, scope?: 'issues'): Promise<string>; openSettings(): void; }
+export interface ViewHost { draftCache?: Drafts; store: IssueStore; author: string; openNote(path: string): Promise<void>; resourceLink(ref?: string, scope?: 'issues'): Promise<string>; openSettings(): void; }
 const PROJECT_STATES: ProjectStatus[] = ['active', 'paused', 'completed', 'archived'];
 const el = <K extends keyof HTMLElementTagNameMap>(parent: HTMLElement, tag: K, cls = '', text = ''): HTMLElementTagNameMap[K] => { const node = document.createElement(tag); node.className = cls; if (text) node.textContent = text; parent.append(node); return node; };
 function prependIcon(parent: HTMLElement, name: string) { const icon = el(parent, 'span', 'li-icon'); setIcon(icon, name); icon.setAttribute('aria-hidden', 'true'); parent.prepend(icon); parent.addClass('li-with-icon'); }
@@ -61,19 +61,23 @@ export class IssuesView extends ItemView {
   private generation = 0;
   private pending = false;
   private closed = false;
+  private initialState = true;
+  private resumeOnDraw?: string;
+  private bindings = new Set<{ save(): void }>();
   private mobilePropertiesOpen = false;
   private phone?: MobilePage;
   private leaveMobileEdit?: () => void;
   private disposeViewport?: () => void;
-  constructor(leaf: WorkspaceLeaf, private host: ViewHost) { super(leaf); this.navigation = true; this.draftCache = new Drafts(this.app, message => { new Notice(message, 0); }); }
+  constructor(leaf: WorkspaceLeaf, private host: ViewHost) { super(leaf); this.navigation = true; this.draftCache = host.draftCache || new Drafts({ read: () => undefined, write: () => {} }, message => { new Notice(message, 0); }); }
   getViewType() { return VIEW_TYPE; }
   getDisplayText() { return 'Local Issues'; }
   getIcon() { return 'list-todo'; }
   async onOpen() { this.closed = false; this.disposeViewport?.(); this.disposeViewport = observeMobileViewport(this.contentEl); suppressTooltips(this.contentEl); this.renderScope.load(); await this.refresh(); }
-  async onClose() { this.closed = true; ++this.generation; this.disposeViewport?.(); this.disposeViewport = undefined; this.deletePrompt?.close(); this.submissionNotice?.hide(); this.discardPrompt?.close(); this.stopEditing(); this.renderScope.unload(); }
+  async onClose() { this.closed = true; ++this.generation; this.disposeViewport?.(); this.disposeViewport = undefined; this.deletePrompt?.close(); this.submissionNotice?.hide(); this.discardPrompt?.close(); this.stopEditing(); this.captureDrafts(); this.renderScope.unload(); }
   getState() { return { projectId: this.projectId, issueId: this.issueId, creating: this.creating, query: this.query, projectState: this.state, issueState: this.issueState, mode: this.mode, label: this.label, milestone: this.milestone, sort: this.sort, group: this.group }; }
   getEphemeralState() { return { scrollTop: (this.phone?.content || this.contentEl).scrollTop }; }
   setEphemeralState(state: { scrollTop?: number }) { if (typeof state?.scrollTop === 'number' && Number.isFinite(state.scrollTop)) (this.phone?.content || this.contentEl).scrollTop = Math.max(0, state.scrollTop); }
+  private captureDrafts() { for (const binding of this.bindings) binding.save(); }
   private get editingInline() {
     if (this.activeEdit && !this.contentEl.contains(this.activeEdit.element)) this.stopEditing(true);
     return !!this.activeEdit;
@@ -108,7 +112,7 @@ export class IssuesView extends ItemView {
     this.leaveMobileEdit?.(); this.leaveMobileEdit = undefined;
     edit?.element.removeClass('li-editing');
     this.contentEl.querySelector('.li-editing-location')?.remove();
-    if (discard) edit?.discard();
+    if (discard) { this.captureDrafts(); if (edit) this.draftCache.suspend(); edit?.discard(); }
   }
   private afterEditing(run: () => void | Promise<unknown>, allowDuringSubmission = false): Promise<void> {
     if (this.discardPrompt?.modalEl.isConnected) {
@@ -144,6 +148,16 @@ export class IssuesView extends ItemView {
     });
   }
   async setState(state: IssueViewState, result: ViewStateResult) {
+    if (this.initialState) {
+      this.initialState = false;
+      const data = await this.host.store.snapshot();
+      this.migrateDrafts(data);
+      const key = this.draftCache.active(), route = key && this.draftRoute(key, data);
+      if (route && (!state.projectId || (state.projectId === route.projectId && (!state.issueId || state.issueId === route.issueId)))) {
+        state = { ...state, ...route };
+        this.resumeOnDraw = key;
+      }
+    }
     const before = JSON.stringify(this.getState());
     result.history = false;
     await this.afterEditing(async () => {
@@ -159,6 +173,7 @@ export class IssuesView extends ItemView {
   }
   async navigate(projectId?: string, issueId?: string) {
     await this.afterEditing(async () => {
+      this.draftCache.suspend();
       await this.leaf.setViewState({ type: VIEW_TYPE, state: { ...this.getState(), projectId, issueId, creating: undefined, query: '', projectState: '', label: '', milestone: '', ...(projectId !== this.projectId ? { group: '', issueState: 'open' } : {}) } });
     });
   }
@@ -173,7 +188,7 @@ export class IssuesView extends ItemView {
     if (this.editingInline || this.submittingComment || this.batching) { this.pending = true; this.showPending(); return; }
     const sequence = ++this.generation;
     const data = await this.host.store.snapshot(); if (sequence !== this.generation) return;
-    this.data = data; this.pending = false; this.renderScope.unload(); this.renderScope = new Component(); this.renderScope.load();
+    this.data = data; this.pending = false; this.captureDrafts(); this.renderScope.unload(); this.bindings.clear(); this.renderScope = new Component(); this.renderScope.load();
     this.contentEl.replaceChildren(); this.contentEl.addClass('local-issues');
     const shell = el(this.contentEl, 'div', 'li-shell');
     const project = data.projects.find(p => p.id === this.projectId);
@@ -183,19 +198,21 @@ export class IssuesView extends ItemView {
       const page = this.phone;
       page.title.textContent = this.creating ? '新建议题' : this.issueId ? `#${data.issues.find(i => i.id === this.issueId)?.number || ''}` : project?.title || `项目 · ${data.projects.length}`;
       if (project) action(page.leading, '返回', () => safe(() => this.navigate(this.issueId || this.creating ? project.id : undefined)), 'li-subtle li-mobile-back', 'chevron-left');
+      action(page.actions, '草稿', () => this.showDrafts(), 'li-subtle').setAttribute('aria-label', '草稿');
       if (!project) action(page.actions, '设置', () => this.host.openSettings(), 'li-subtle', 'settings');
       body = page.content;
     } else {
       const top = el(shell, 'div', 'li-topbar');
       action(top, '项目', () => safe(() => this.navigate()), 'li-breadcrumb');
       if (project) { el(top, 'span', 'li-muted', '/'); action(top, project.title, () => safe(() => this.navigate(project.id)), 'li-breadcrumb'); }
-      el(top, 'div', 'li-spacer'); action(top, '设置', () => this.host.openSettings(), 'li-subtle', 'settings');
+      action(top, '草稿', () => this.showDrafts(), 'li-subtle'); el(top, 'div', 'li-spacer'); action(top, '设置', () => this.host.openSettings(), 'li-subtle', 'settings');
     }
     if (data.warnings.length) { const details = el(body, 'details', 'li-warning'); el(details, 'summary', '', `${data.warnings.length} 个笔记需要检查`); for (const warning of data.warnings) el(details, 'div', '', warning); }
     if (this.creating && project && this.creating.projectId === project.id) this.issueModal(project, undefined, this.creating.defaults, body);
     else if (this.issueId) { const issue = data.issues.find(i => i.id === this.issueId); if (issue) this.renderIssue(body, issue); else { el(body, 'p', '', '此 Issue 已移动或不存在。'); action(body, '返回项目', () => safe(() => this.navigate(project?.id))); } }
     else if (project) this.renderProject(body, project);
     else this.renderProjects(body);
+    if (this.resumeOnDraw) { const key = this.resumeOnDraw; this.resumeOnDraw = undefined; this.openDraftEditor(key); }
   }
   private markdown(parent: HTMLElement, body: string, path: string) {
     const node = el(parent, 'div', 'li-markdown markdown-rendered');
@@ -214,9 +231,63 @@ export class IssuesView extends ItemView {
     }, true);
     return node;
   }
+  private migrateDrafts(data: Snapshot) {
+    // Read old drafts once by their known keys; keep the originals as a migration backup.
+    if (this.draftCache.list().length) return;
+    this.draftCache.read('new-project');
+    for (const project of data.projects) { this.draftCache.read(`new-issue:${project.id}:`); this.draftCache.read(`project:${project.id}`); }
+  }
+  private draftRoute(key: string, data = this.data): IssueViewState | undefined {
+    const [kind, id, parent] = key.split(':');
+    if (kind === 'new-project') return {};
+    if (kind === 'project' || kind === 'new-issue') {
+      if (!data.projects.some(project => project.id === id)) return;
+      return { projectId: id, ...(kind === 'new-issue' ? { creating: { projectId: id, defaults: parent ? { parent } : {} } } : {}) };
+    }
+    const issueId = kind === 'comment' ? data.timeline.find(entry => entry.id === id)?.issueId : id;
+    const issue = data.issues.find(issue => issue.id === issueId);
+    if (issue && ['issue-body', 'issue-title', 'issue-field', 'new-comment', 'comment'].includes(kind)) return { projectId: issue.projectId, issueId: issue.id };
+  }
+  private openDraftEditor(key: string) {
+    const [kind, id, name] = key.split(':');
+    const click = (parent: Element | null, label: string) => [...(parent?.querySelectorAll<HTMLButtonElement>('button') || [])].find(button => button.textContent === label || button.getAttribute('aria-label') === label)?.click();
+    if (kind === 'new-project') this.projectModal();
+    else if (kind === 'project') { const project = this.data.projects.find(project => project.id === id); if (project) this.projectModal(project); }
+    else if (kind === 'issue-body') click(this.contentEl.querySelector('.li-description'), '编辑');
+    else if (kind === 'issue-title') click(this.contentEl, '编辑标题');
+    else if (kind === 'comment') click([...this.contentEl.querySelectorAll<HTMLElement>('[data-comment-id]')].find(node => node.dataset.commentId === id) || null, '编辑');
+    else if (kind === 'new-comment') { if (this.phone) click(this.phone.actions, '继续评论'); else this.contentEl.querySelector<HTMLElement>('.li-composer .cm-content')?.focus(); }
+    else if (kind === 'issue-field') { const properties = this.contentEl.querySelector<HTMLDetailsElement>('.li-mobile-properties'); if (properties) properties.open = true; click(this.contentEl, `修改${name}`); }
+  }
+  private showDrafts() {
+    safe(() => this.afterEditing(() => {
+      const modal = this.modal('草稿');
+      const drafts = this.draftCache.list();
+      if (!drafts.length) el(modal.contentEl, 'p', 'li-muted', '没有未提交的草稿。');
+      for (const draft of drafts) {
+        const route = this.draftRoute(draft.key), project = this.data.projects.find(project => project.id === route?.projectId), issue = this.data.issues.find(issue => issue.id === route?.issueId);
+        const row = el(modal.contentEl, 'article', 'li-draft-item');
+        const [kind] = draft.key.split(':');
+        const type = ({ 'new-issue': '新建议题', 'new-project': '新建项目', project: '编辑项目', 'issue-body': '编辑正文', 'issue-title': '编辑标题', 'issue-field': '编辑属性', comment: '编辑评论', 'new-comment': '未发表的评论' } as Record<string, string>)[kind] || '未提交的输入';
+        el(row, 'strong', '', (['new-issue', 'new-project', 'project', 'issue-title'].includes(kind) ? draft.value.fields[0] : issue?.title) || issue?.title || type);
+        el(row, 'p', 'li-muted', `${project?.title ? project.title + ' · ' : ''}${type}`);
+        action(row, route ? '继续编辑' : '查看内容', () => {
+          modal.close();
+          if (!route) { const copy = this.modal('草稿内容'); el(copy.contentEl, 'pre', 'li-draft-raw', [...draft.value.fields, ...draft.value.editors].join('\n\n')); copy.open(); return; }
+          safe(async () => {
+            this.draftCache.activate(draft.key);
+            await this.leaf.setViewState({ type: VIEW_TYPE, state: { ...this.getState(), projectId: undefined, issueId: undefined, creating: undefined, ...route } });
+            this.openDraftEditor(draft.key);
+          });
+        }, 'mod-cta');
+      }
+      modal.open();
+    }));
+  }
   private cacheForm(root: HTMLElement, key: string, revision?: string, extra?: { read(): unknown; restore?(value: unknown): void }) {
     const nodes = root.matches('.li-editor') ? [root] : [...root.querySelectorAll<HTMLElement>('.li-editor')];
-    return this.draftCache.bind(root, key, nodes.map(node => this.editors.get(node)!).filter(Boolean), { revision, extra });
+    const binding = this.draftCache.bind(root, key, nodes.map(node => this.editors.get(node)!).filter(Boolean), { revision, extra });
+    this.bindings.add(binding); return binding;
   }
   private mobileSearch(placeholder: string, project?: Project) {
     const row = el(this.phone!.controls, 'form', 'li-mobile-search');

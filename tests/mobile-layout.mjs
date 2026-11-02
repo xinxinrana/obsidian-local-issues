@@ -111,7 +111,7 @@ try {
   await editPage.locator('.cm-content').tap(); await page.keyboard.insertText('手机里继续讨论。');
   await (await navButtonVisible('发表评论')).tap();
   await page.waitForFunction(async () => (await fixture.plugin.store.snapshot()).timeline.some(t => t.body === '手机里继续讨论。'));
-  await page.evaluate(() => fixture.plugin.activate()); await page.locator('.li-project-card').first().waitFor();
+  await page.evaluate(() => fixture.view.navigate()); await page.locator('.li-project-card').first().waitFor();
   await page.getByRole('button', { name: '新建项目', exact: true }).tap(); await editPage.getByLabel('项目名称', { exact: true }).fill('手机上新建的项目');
   await page.evaluate(() => { Object.defineProperty(visualViewport, 'height', { value: 420, configurable: true }); visualViewport.dispatchEvent(new Event('resize')); });
   await fits('键盘下新建项目');

@@ -363,3 +363,8 @@ body:has(.li-no-tooltips:hover) .tooltip,
 
 .is-mobile .local-issues .li-tappable { cursor: pointer; touch-action: manipulation; }
 .is-mobile .local-issues .li-tappable:active { background: var(--background-modifier-hover); }
+
+.local-issues .li-draft-item { display: grid; gap: 6px; padding: 12px 0; border-bottom: 1px solid var(--li-border); }
+.local-issues .li-draft-item :is(strong,p) { overflow-wrap: anywhere; }
+.local-issues .li-draft-item button { justify-self: start; }
+.local-issues .li-draft-raw { white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }

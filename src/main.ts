@@ -1,6 +1,8 @@
 import { App, FileSystemAdapter, Notice, Platform, Plugin, PluginSettingTab, Setting, TFile, normalizePath, requestUrl } from 'obsidian';
 import { MobileModal } from './mobile';
 import { randomUUID } from './platform-crypto';
+import { DraftJournal } from './draft-journal';
+import { Drafts } from './drafts';
 import type { CliInstaller, CliProgress } from './cli-installer';
 import { agentGuide, agentSkill } from './agent-skill';
 import { ResourceRoutes, slug } from './routes';
@@ -19,6 +21,7 @@ interface Settings {
   projectSlugs?: Record<string, string>;
   shares: Record<string, { ref: string }>;
   cliNodePath?: string;
+  draftStorageId?: string;
 }
 const DEFAULTS: Settings = { root: 'Local Issues', author: '我', apiEnabled: false, port: 27183, shares: {} };
 
@@ -26,6 +29,8 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
   declare settings: Settings;
   store!: Store;
   routes!: ResourceRoutes;
+  draftCache!: Drafts;
+  draftJournal!: DraftJournal;
   private server?: Awaited<ReturnType<typeof startApi>>;
   private refreshTimer?: ReturnType<typeof setTimeout>;
   private unloaded = false;
@@ -54,9 +59,16 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
     this.settings.shares = Object.fromEntries(Object.entries(this.settings.shares).map(([id, entry]) => [id, { ref: entry.ref }]));
     this.settings.repoSlug ??= slug(this.app.vault.getName());
     this.settings.projectSlugs ??= {};
+    this.settings.draftStorageId ||= randomUUID();
     this.routes = new ResourceRoutes(this.settings.repoSlug, this.settings.projectSlugs, () => this.saveData(this.settings));
     await this.saveData(this.settings);
     this.configureStore();
+    let journal: Storage | undefined;
+    try { journal = window.localStorage; } catch { /* Use the independent disk replica. */ }
+    this.draftJournal = new DraftJournal({ prefix: `local-issues:${this.settings.draftStorageId}`, directory: `${this.manifest.dir || `${this.app.vault.configDir}/plugins/local-issues`}/drafts`, disk: this.app.vault.adapter,
+      journal, legacy: key => this.app.loadLocalStorage?.(key), warn: message => { new Notice(message, 0); } });
+    await this.draftJournal.initialize();
+    this.draftCache = new Drafts(this.draftJournal, message => { new Notice(message, 0); });
     this.registerView(VIEW_TYPE, leaf => new IssuesView(leaf, this));
     this.addRibbonIcon('list-todo', 'Local Issues：项目', () => { void this.activate().catch(this.report); });
     this.addCommand({ id: 'open-projects', name: '打开项目', callback: () => { void this.activate().catch(this.report); } });
@@ -139,9 +151,9 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
   async activate(projectId?: string, issueId?: string): Promise<void> {
     const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0];
     const leaf = existing ?? this.app.workspace.getLeaf('tab');
-    if (!existing) await leaf.setViewState({ type: VIEW_TYPE, active: true });
+    if (!existing) await leaf.setViewState({ type: VIEW_TYPE, active: true, state: projectId || issueId ? { projectId, issueId } : {} });
     await this.app.workspace.revealLeaf(leaf);
-    if (leaf.view instanceof IssuesView) await leaf.view.navigate(projectId, issueId);
+    if (existing && (projectId || issueId) && leaf.view instanceof IssuesView) await leaf.view.navigate(projectId, issueId);
   }
 
   async openReference(ref: string): Promise<void> {
@@ -328,6 +340,7 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
 
   onunload(): void {
     this.unloaded = true;
+    void this.draftJournal?.flush().catch(this.report);
     this.cliListeners.clear();
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     void this.apiQueue.finally(() => this.server?.close()).catch(console.error);

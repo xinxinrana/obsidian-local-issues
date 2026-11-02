@@ -70,7 +70,7 @@ const MarkdownRenderer = { async render(app, body, el, sourcePath, component) { 
 class Plugin extends Component {
   constructor(app, manifest) { super(); this.app = app; this.manifest = manifest; this.commands = []; this.views = new Map(); this.protocols = new Map(); }
   async loadData() { return this.app.savedData; }
-  async saveData(data) { this.app.savedData = data; }
+  async saveData(data) { this.app.savedData = data; await this.app.persist?.(); }
   registerView(type, factory) { this.views.set(type, factory); }
   addRibbonIcon(icon, label, callback) { this.ribbon = { icon, label, callback }; return document.createElement('div'); }
   addCommand(command) { this.commands.push(command); }
