@@ -73,6 +73,12 @@ try {
   await fits('正文编辑、长段落与图片附件');
   await navButtonVisible('保存');
   await page.screenshot({ scale: 'css', path: join(output, 'editor-iphone17.png') });
+  await (await navButtonVisible('取消')).tap();
+  await page.locator('.li-description').getByRole('button', { name: '编辑', exact: true }).tap();
+  await editPage.locator('.cm-editor').waitFor();
+  await editPage.getByText('已恢复本机草稿', { exact: true }).waitFor();
+  assert.equal(await editPage.locator('img.li-live-image').count(), 1, '恢复草稿时保留图片附件引用');
+  await fits('恢复长文与图片草稿');
   // WKWebView can shrink only the visual viewport, retaining the layout height.
   await page.evaluate(() => { window.testViewportHeight = 430; Object.defineProperty(visualViewport, 'height', { get: () => testViewportHeight, configurable: true }); visualViewport.dispatchEvent(new Event('resize')); });
   await fits('键盘展开仅缩小可视区域');

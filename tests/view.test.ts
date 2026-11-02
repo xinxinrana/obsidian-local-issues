@@ -202,7 +202,7 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     fill(composer().querySelector('.cm-content'), '需要明确反馈的评论');
     for (let i = 0; i < 3; i++) click('发表评论', composer());
     assert.equal(mock.modals.length, 1, '重复操作只打开一个确认框');
-    assert.match(mock.modals[0].contentEl.textContent, /议题描述.*丢失/);
+    assert.match(mock.modals[0].contentEl.textContent, /议题描述.*暂存在本机/);
     click('返回编辑', mock.modals[0].modalEl);
     await until(() => dom.window.document.activeElement === dirtyDescription, '返回编辑定位到真正的编辑框');
     assert.equal(value(dirtyDescription), '未保存的描述修改');
@@ -211,7 +211,7 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     for (let i = 0; i < 5; i++) click('删除', view.contentEl.querySelector('.li-timeline .li-comment'));
     assert.equal(mock.modals.length, 1, '编辑中连续删除不会重复弹窗或刷提示');
     assert.ok(!deleteDialog());
-    click('放弃修改并继续', mock.modals[0].modalEl);
+    click('保留草稿并继续', mock.modals[0].modalEl);
     await until(() => !!deleteDialog(), '放弃修改后继续原来的删除操作');
     assert.equal((await store.getIssue(issue.id)).body, '外部编辑正文');
     assert.ok(!view.contentEl.querySelector('.li-description .cm-content'));
@@ -227,7 +227,7 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     const submitButton = [...composer().querySelectorAll('button')].find(button => button.textContent === '发表评论') as HTMLButtonElement;
     submitButton.click(); submitButton.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
     assert.equal(mock.modals.length, 1);
-    click('放弃修改并继续', mock.modals[0].modalEl);
+    click('保留草稿并继续', mock.modals[0].modalEl);
     await until(() => /正在发表/.test(submitButton.textContent), '放弃修改后继续发表评论');
     submitButton.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
     assert.match(composer().textContent, /正在发表/);
@@ -289,7 +289,7 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     click('编辑标题'); fill(view.contentEl.querySelector('input[aria-label="议题标题"]'), '不保存的标题');
     click('编辑', view.contentEl.querySelector('.li-timeline .li-comment'));
     assert.match(mock.modals[0].contentEl.textContent, /议题标题/);
-    click('放弃修改并继续', mock.modals[0].modalEl);
+    click('保留草稿并继续', mock.modals[0].modalEl);
     await until(() => !!view.contentEl.querySelector('.li-timeline .cm-content'), '放弃标题后编辑评论');
     fill(view.contentEl.querySelector('.li-timeline .cm-content'), '不保存的评论');
     const originalState = view.getState();
@@ -298,16 +298,16 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     mock.modals[0].close(); await cancelledNavigation;
     assert.deepEqual(view.getState(), originalState, '关闭确认框保持当前页面及草稿');
     assert.equal(value(view.contentEl.querySelector('.li-timeline .cm-content')), '不保存的评论');
-    view.contentEl.querySelector<HTMLButtonElement>('[aria-label="修改标签"]')!.click(); click('放弃修改并继续', mock.modals[0].modalEl);
+    view.contentEl.querySelector<HTMLButtonElement>('[aria-label="修改标签"]')!.click(); click('保留草稿并继续', mock.modals[0].modalEl);
     await until(() => !!view.contentEl.querySelector('.li-sidebar .li-property-editor'), '放弃评论后修改属性');
     fill(view.contentEl.querySelector('.li-sidebar input[placeholder="多个标签用逗号分隔"]'), '不保存标签');
     click('添加子议题'); assert.match(mock.modals[0].contentEl.textContent, /议题属性/);
-    click('放弃修改并继续', mock.modals[0].modalEl);
+    click('保留草稿并继续', mock.modals[0].modalEl);
     await until(() => !!view.contentEl.querySelector('.li-create'), '放弃属性后新建议题');
     fill(view.contentEl.querySelector('input[placeholder="简洁描述这件事"]'), '不保存的新议题');
     const acceptedNavigation = view.navigate(project.id);
     assert.match(mock.modals[0].contentEl.textContent, /新建议题/);
-    click('放弃修改并继续', mock.modals[0].modalEl); await acceptedNavigation;
+    click('保留草稿并继续', mock.modals[0].modalEl); await acceptedNavigation;
     assert.ok(!view.contentEl.querySelector('.li-create'));
     assert.equal((await store.snapshot()).issues.length, 2);
     await view.navigate(project.id, issue.id);
@@ -317,7 +317,7 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     fill(view.contentEl.querySelector('.li-description .cm-content'), '刷新前未保存');
     await view.refresh(); click('有更新 · 刷新');
     assert.equal(mock.modals.length, 1);
-    click('放弃修改并继续', mock.modals[0].modalEl);
+    click('保留草稿并继续', mock.modals[0].modalEl);
     await until(() => !view.contentEl.querySelector('.li-description .cm-content'), '确认放弃后刷新');
     dom.window.document.activeElement?.blur();
     const snapshot = store.snapshot.bind(store);

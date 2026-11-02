@@ -31,6 +31,7 @@ test('mobile bundle works without Node globals/modules and exposes only manual v
   const f = await module.exports.createMobileFixture();
   const wait = async (check: () => boolean | Promise<boolean>) => { for (let n = 0; n < 300; n++) { if (await check()) return; await new Promise(r => setTimeout(r, 5)); } assert.fail(f.mock.notices.join(' / ')); };
   const click = (label: string, parent: Element = f.view.contentEl) => { const button = [...parent.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === label); assert.ok(button, label); button.click(); };
+  const reopened: any[] = [];
   try {
     assert.deepEqual(requested, []); assert.equal(f.app.savedData.apiEnabled, true, 'Mobile leaves synchronized desktop preferences intact');
     assert.ok(!f.plugin.commands.some((c: any) => /CLI|Agent|Skill/.test(c.name)));
@@ -51,7 +52,7 @@ test('mobile bundle works without Node globals/modules and exposes only manual v
     const field = f.view.contentEl.querySelector('.li-property-editor input'); field.value = '手机标签'; field.dispatchEvent(new w.Event('input', { bubbles: true }));
     await wait(() => !!f.view.contentEl.querySelector('.li-mobile-edit-page .li-property-editor'));
     const navigation = f.plugin.activate(project.id);
-    await wait(() => f.mock.modals.some((m: any) => m.titleEl.textContent === '放弃未保存的修改？'));
+    await wait(() => f.mock.modals.some((m: any) => m.titleEl.textContent === '离开当前编辑？'));
     click('返回编辑', f.mock.modals.at(-1).modalEl); await navigation;
     click('取消', f.view.contentEl.querySelector('.li-mobile-edit-nav'));
     click('编辑', f.view.contentEl.querySelector('.li-description')); await wait(() => !!f.view.contentEl.querySelector('.li-mobile-edit-page .cm-editor'));
@@ -87,6 +88,50 @@ test('mobile bundle works without Node globals/modules and exposes only manual v
     await wait(async () => (await f.plugin.store.getIssue(issue.id)).status === 'closed');
     f.plugin.openSettings(); assert.doesNotMatch(f.mock.modals.at(-1).contentEl.textContent, /Agent|CLI|API|端口|分享/); f.mock.modals.at(-1).close();
     assert.equal(listeners, 2); assert.deepEqual(requested, []);
+    await f.plugin.activate(project.id); await wait(() => !!f.view.contentEl.querySelector('[aria-label="新建 Issue"]'));
+    click('新建', f.view.contentEl.querySelector('.li-mobile-nav'));
+    await wait(() => !!f.view.contentEl.querySelector('.li-mobile-edit-page input[placeholder="简洁描述这件事"]'));
+    const form = f.view.contentEl.querySelector('.li-mobile-edit-page');
+    const title = form.querySelector('input[placeholder="简洁描述这件事"]'); title.value = '手机输入到一半的标题'; title.dispatchEvent(new w.Event('input', { bubbles: true }));
+    const label = form.querySelector('[aria-label="标签"]'); label.value = '重要, 未输入完，'; label.dispatchEvent(new w.Event('input', { bubbles: true }));
+    const attachment = await f.plugin.store.attach(project.id, '草稿图片.png', new Uint8Array([1, 2, 3]));
+    const body = '输入中的中文 **尚未提交**\n' + attachment.markdown; f.setMarkdown(form, body);
+    const deps = form.querySelector('[aria-label="搜索依赖议题"]'); deps.value = '@手机端'; deps.dispatchEvent(new w.Event('input', { bubbles: true }));
+    form.querySelector('.li-dependency-option').click();
+    const createState = f.view.getState(); assert.equal(createState.creating.projectId, project.id);
+    const draftKey = `local-issues:draft:new-issue:${project.id}:`;
+    assert.ok(f.persistence.storage.get(draftKey).includes('输入中的中文'), 'Input is durable immediately, without waiting for blur, timers or close');
     await f.close(); assert.equal(listeners, 0);
-  } finally { await f.close(); w.close(); }
+    const resumed = await module.exports.createMobileFixture(f.persistence); reopened.push(resumed);
+    await resumed.view.setState(createState, { history: false });
+    await wait(() => !!resumed.view.contentEl.querySelector('.li-mobile-edit-page'));
+    const recovered = resumed.view.contentEl.querySelector('.li-mobile-edit-page');
+    assert.equal(recovered.querySelector('input[placeholder="简洁描述这件事"]').value, '手机输入到一半的标题');
+    assert.equal(recovered.querySelector('[aria-label="标签"]').value, '重要, 未输入完，');
+    assert.match(recovered.textContent, /输入中的中文/); assert.match(recovered.querySelector('img.li-live-image')?.alt || '', /草稿图片/);
+    assert.equal(recovered.querySelectorAll('.li-selected-dependencies .li-dependency-chip').length, 1);
+    click('创建议题', recovered);
+    await wait(async () => (await resumed.plugin.store.snapshot()).issues.some((i: any) => i.title === title.value));
+    const created = (await resumed.plugin.store.snapshot()).issues.find((i: any) => i.title === title.value);
+    assert.equal(created.body, body); assert.deepEqual([...created.dependencies], [issue.id]); assert.equal(f.persistence.storage.has(draftKey), false);
+    await wait(() => !resumed.view.contentEl.querySelector('.li-mobile-edit-page'));
+    click('评论', resumed.view.contentEl.querySelector('.li-mobile-nav')); await wait(() => !!resumed.view.contentEl.querySelector('.li-mobile-edit-page .cm-editor'));
+    resumed.setMarkdown(resumed.view.contentEl.querySelector('.li-mobile-edit-page'), '关闭应用前还没发表的评论');
+    await resumed.close();
+    const restarted = await module.exports.createMobileFixture(f.persistence); reopened.push(restarted);
+    await restarted.plugin.activate(project.id, created.id);
+    click('继续评论', restarted.view.contentEl.querySelector('.li-mobile-nav')); await wait(() => !!restarted.view.contentEl.querySelector('.li-mobile-edit-page'));
+    const pending = restarted.view.contentEl.querySelector('.li-mobile-edit-page'); assert.match(pending.textContent, /关闭应用前还没发表的评论/);
+    click('发表评论', pending); await wait(async () => (await restarted.plugin.store.snapshot()).timeline.some((t: any) => t.body === '关闭应用前还没发表的评论'));
+    assert.equal(f.persistence.storage.has(`local-issues:draft:new-comment:${created.id}`), false);
+    await wait(() => !restarted.view.contentEl.querySelector('.li-mobile-edit-page'));
+    await restarted.plugin.activate(project.id, issue.id); click('编辑', restarted.view.contentEl.querySelector('.li-description'));
+    await wait(() => !!restarted.view.contentEl.querySelector('.li-mobile-edit-page'));
+    assert.match(restarted.view.contentEl.querySelector('.li-mobile-edit-page').textContent, /手机尚未保存的修改/);
+    const previousNotices = f.mock.notices.length; click('保存', restarted.view.contentEl.querySelector('.li-mobile-edit-nav'));
+    await wait(() => f.mock.notices.slice(previousNotices).some((message: string) => message.includes('冲突')));
+    assert.equal((await restarted.plugin.store.getIssue(issue.id)).body, '另一台设备同步的正文', 'Restored drafts keep their original revision and cannot overwrite a newer edit');
+    await restarted.close(); assert.equal(listeners, 0); assert.deepEqual(requested, []);
+
+  } finally { for (const fixture of reopened) await fixture.close(); await f.close(); w.close(); }
 });

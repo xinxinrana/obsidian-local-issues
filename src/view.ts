@@ -3,6 +3,7 @@ import { createLiveMarkdown, MARKDOWN_TOOLS } from './live-markdown';
 import { suppressTooltips } from './tooltips';
 import { MobileModal, observeMobileViewport } from './mobile';
 import { mobilePage, type MobilePage } from './mobile-layout';
+import { Drafts, type DraftEditor } from './drafts';
 import { ISSUE_STATUSES, STATUS_NAMES, CLOSE_REASON_NAMES, issueLink, CloseReason, Issue, IssueInput, IssuePatch, IssueStore, Project, ProjectStatus, Snapshot, TimelineEntry } from './types';
 
 export const VIEW_TYPE = 'local-issues-view';
@@ -28,7 +29,7 @@ function pill(parent: HTMLElement, status: string, reason?: CloseReason) {
 const stateOptions: [string, string][] = [['open', '开启'], ['completed', '关闭 · 完成'], ['on-hold', '关闭 · 搁置'], ['not-planned', '关闭 · 不做']];
 const stateValue = (issue: Pick<Issue, 'status' | 'closeReason'>) => issue.status === 'closed' ? issue.closeReason || 'completed' : 'open';
 const statePatch = (value: string): IssuePatch => value === 'open' ? { status: 'open' } : { status: 'closed', closeReason: value as CloseReason };
-interface IssueViewState { projectId?: string; issueId?: string; query?: string; projectState?: string; issueState?: 'open' | 'closed'; mode?: 'list' | 'board' | 'table'; label?: string; milestone?: string; sort?: string; group?: string; }
+interface IssueViewState { creating?: { projectId: string; defaults: Partial<IssueInput> }; projectId?: string; issueId?: string; query?: string; projectState?: string; issueState?: 'open' | 'closed'; mode?: 'list' | 'board' | 'table'; label?: string; milestone?: string; sort?: string; group?: string; }
 
 export class IssuesView extends ItemView {
   private projectId?: string;
@@ -54,6 +55,8 @@ export class IssuesView extends ItemView {
   private batching = false;
   private batchFeedback = '';
   private drafts = new Map<string, string>();
+  private draftCache: Drafts;
+  private editors = new WeakMap<HTMLElement, DraftEditor>();
   private renderScope = new Component();
   private generation = 0;
   private pending = false;
@@ -62,13 +65,13 @@ export class IssuesView extends ItemView {
   private phone?: MobilePage;
   private leaveMobileEdit?: () => void;
   private disposeViewport?: () => void;
-  constructor(leaf: WorkspaceLeaf, private host: ViewHost) { super(leaf); this.navigation = true; }
+  constructor(leaf: WorkspaceLeaf, private host: ViewHost) { super(leaf); this.navigation = true; this.draftCache = new Drafts(this.app, message => { new Notice(message, 0); }); }
   getViewType() { return VIEW_TYPE; }
   getDisplayText() { return 'Local Issues'; }
   getIcon() { return 'list-todo'; }
   async onOpen() { this.closed = false; this.disposeViewport?.(); this.disposeViewport = observeMobileViewport(this.contentEl); suppressTooltips(this.contentEl); this.renderScope.load(); await this.refresh(); }
   async onClose() { this.closed = true; ++this.generation; this.disposeViewport?.(); this.disposeViewport = undefined; this.deletePrompt?.close(); this.submissionNotice?.hide(); this.discardPrompt?.close(); this.stopEditing(); this.renderScope.unload(); }
-  getState() { return { projectId: this.projectId, issueId: this.issueId, query: this.query, projectState: this.state, issueState: this.issueState, mode: this.mode, label: this.label, milestone: this.milestone, sort: this.sort, group: this.group }; }
+  getState() { return { projectId: this.projectId, issueId: this.issueId, creating: this.creating, query: this.query, projectState: this.state, issueState: this.issueState, mode: this.mode, label: this.label, milestone: this.milestone, sort: this.sort, group: this.group }; }
   getEphemeralState() { return { scrollTop: (this.phone?.content || this.contentEl).scrollTop }; }
   setEphemeralState(state: { scrollTop?: number }) { if (typeof state?.scrollTop === 'number' && Number.isFinite(state.scrollTop)) (this.phone?.content || this.contentEl).scrollTop = Math.max(0, state.scrollTop); }
   private get editingInline() {
@@ -123,9 +126,9 @@ export class IssuesView extends ItemView {
       return (async () => { await run(); })();
     }
     const edit = this.activeEdit!;
-    const modal = this.discardPrompt = this.modal('放弃未保存的修改？');
+    const modal = this.discardPrompt = this.modal('离开当前编辑？');
     el(modal.contentEl, 'p', '', `正在编辑：${edit.label}`);
-    el(modal.contentEl, 'p', 'li-muted', '继续操作将丢失这处尚未保存的修改。');
+    el(modal.contentEl, 'p', 'li-muted', '输入已暂存在本机，继续操作后可重新打开编辑，接着上次的草稿。');
     let discard = false;
     return new Promise<void>((resolve, reject) => {
       modal.onClose = () => {
@@ -136,7 +139,7 @@ export class IssuesView extends ItemView {
       };
       const buttons = el(modal.modalEl, 'div', 'li-modal-actions');
       const keep = action(buttons, '返回编辑', () => modal.close());
-      action(buttons, '放弃修改并继续', () => { discard = true; modal.close(); }, 'mod-warning');
+      action(buttons, '保留草稿并继续', () => { discard = true; modal.close(); }, 'mod-warning');
       modal.open(); keep.focus();
     });
   }
@@ -144,7 +147,7 @@ export class IssuesView extends ItemView {
     const before = JSON.stringify(this.getState());
     result.history = false;
     await this.afterEditing(async () => {
-      this.projectId = state.projectId; this.issueId = state.issueId; this.creating = undefined;
+      this.projectId = state.projectId; this.issueId = state.issueId; this.creating = state.creating?.projectId === state.projectId ? state.creating : undefined;
       this.query = state.query || ''; this.state = state.projectState || ''; this.issueState = state.issueState === 'closed' ? 'closed' : 'open';
       this.mode = state.mode === 'board' || state.mode === 'table' ? state.mode : 'list';
       this.label = state.label || ''; this.milestone = state.milestone || ''; this.sort = state.sort || 'updated'; this.group = state.group || '';
@@ -156,7 +159,7 @@ export class IssuesView extends ItemView {
   }
   async navigate(projectId?: string, issueId?: string) {
     await this.afterEditing(async () => {
-      await this.leaf.setViewState({ type: VIEW_TYPE, state: { ...this.getState(), projectId, issueId, query: '', projectState: '', label: '', milestone: '', ...(projectId !== this.projectId ? { group: '', issueState: 'open' } : {}) } });
+      await this.leaf.setViewState({ type: VIEW_TYPE, state: { ...this.getState(), projectId, issueId, creating: undefined, query: '', projectState: '', label: '', milestone: '', ...(projectId !== this.projectId ? { group: '', issueState: 'open' } : {}) } });
     });
   }
   async refresh() {
@@ -210,6 +213,10 @@ export class IssuesView extends ItemView {
       else safe(() => this.afterEditing(() => this.app.workspace.openLinkText(href, path, false)));
     }, true);
     return node;
+  }
+  private cacheForm(root: HTMLElement, key: string, revision?: string, extra?: { read(): unknown; restore?(value: unknown): void }) {
+    const nodes = root.matches('.li-editor') ? [root] : [...root.querySelectorAll<HTMLElement>('.li-editor')];
+    return this.draftCache.bind(root, key, nodes.map(node => this.editors.get(node)!).filter(Boolean), { revision, extra });
   }
   private mobileSearch(placeholder: string, project?: Project) {
     const row = el(this.phone!.controls, 'form', 'li-mobile-search');
@@ -466,8 +473,9 @@ export class IssuesView extends ItemView {
       title.replaceChildren();
       const field = input(title, '议题标题', issue.title); field.setAttribute('aria-label', '议题标题'); field.dataset.editor = 'true';
       const controls = el(title, 'div', 'li-inline-actions'); action(controls, '取消', () => { this.stopEditing(true); if (this.pending) safe(() => this.draw()); });
+      const draft = this.cacheForm(title, `issue-title:${issue.id}`, issue.revision ?? issue.updatedAt);
       this.startEditing(title, '议题标题', () => field.value !== issue.title, showTitle);
-      const save = action(controls, '保存', () => safe(async () => { if (!field.value.trim()) throw new Error('请输入 Issue 标题'); save.disabled = true; try { await this.host.store.updateIssue(issue.id, { title: field.value.trim(), actor: this.host.author }, issue.revision ?? issue.updatedAt); this.stopEditing(); await this.draw(); } finally { save.disabled = false; } }), 'mod-cta'); field.focus();
+      const save = action(controls, '保存', () => safe(async () => { if (!field.value.trim()) throw new Error('请输入 Issue 标题'); save.disabled = true; try { const submitted = draft.snapshot(); await this.host.store.updateIssue(issue.id, { title: field.value.trim(), actor: this.host.author }, draft.revision); draft.complete(submitted); this.stopEditing(); await this.draw(); } finally { save.disabled = false; } }), 'mod-cta'); field.focus();
     })), 'li-subtle'); button.setAttribute('aria-label', '编辑标题'); }; showTitle();
     const controls = this.phone?.actions || el(header, 'div', 'li-detail-actions');
     this.moreButton(controls, [
@@ -491,21 +499,22 @@ export class IssuesView extends ItemView {
     const description = el(main, 'article', 'li-comment li-description'); const descriptionHead = el(description, 'div', 'li-comment-header'); el(descriptionHead, 'strong', '', issue.author); el(descriptionHead, 'span', 'li-muted', '描述'); el(descriptionHead, 'div', 'li-spacer');
     const content = el(description, 'div', 'li-description-content'); this.markdown(content, issue.body, issue.path);
     const edit = action(descriptionHead, '编辑', () => safe(() => this.afterEditing(() => {
-      edit.hidden = true; content.replaceChildren(); const text = this.editor(content, issue.body, issue.id, issue.path); const buttons = text.actions;
+      edit.hidden = true; content.replaceChildren(); const text = this.editor(content, issue.body, issue.id, issue.path); const buttons = text.actions; const draft = this.cacheForm(text.element, `issue-body:${issue.id}`, issue.revision ?? issue.updatedAt);
       this.startEditing(text.element, '议题描述', () => text.value !== issue.body || text.uploading, () => { text.destroy(); content.replaceChildren(); this.markdown(content, issue.body, issue.path); edit.hidden = false; });
       action(buttons, '取消', () => { this.stopEditing(true); if (this.pending) safe(() => this.draw()); });
-      const save = action(buttons, '保存', () => safe(async () => { if (text.uploading) throw new Error('附件正在保存，请稍后保存'); save.disabled = true; try { await this.host.store.updateIssue(issue.id, { body: text.value, actor: this.host.author }, issue.revision ?? issue.updatedAt); this.stopEditing(); await this.draw(); } finally { save.disabled = false; } }), 'mod-cta'); text.focus();
+      const save = action(buttons, '保存', () => safe(async () => { if (text.uploading) throw new Error('附件正在保存，请稍后保存'); save.disabled = true; try { const submitted = draft.snapshot(); await this.host.store.updateIssue(issue.id, { body: text.value, actor: this.host.author }, draft.revision); draft.complete(submitted); this.stopEditing(); await this.draw(); } finally { save.disabled = false; } }), 'mod-cta'); text.focus();
     })), 'li-subtle');
     const children = this.data.issues.filter(i => i.parent === issue.id); if (children.length) { const section = el(main, 'section', 'li-relations'); el(section, 'h3', '', `子议题 · ${children.filter(i => i.status === 'closed').length}/${children.length}`); for (const child of children) { const row = el(section, 'div', 'li-relation'); pill(row, child.status, child.closeReason); action(row, `#${child.number} ${child.title}`, () => safe(() => this.navigate(child.projectId, child.id)), 'li-subtle'); } }
     action(main, '添加子议题', () => this.issueModal(project, undefined, { parent: issue.id }), 'li-subtle', 'plus');
     const timeline = el(main, 'div', 'li-timeline'); const entries = this.data.timeline.filter(e => e.issueId === issue.id).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    for (const entry of entries) { if (entry.kind === 'event') { const event = el(timeline, 'div', 'li-event'); pill(event, entry.to || 'open'); el(event, 'span', '', `${entry.author} ${entry.body}`); el(event, 'span', 'li-muted', date(entry.createdAt)); } else { const comment = el(timeline, 'article', 'li-comment'); comment.dataset.commentId = entry.id; const head = el(comment, 'div', 'li-comment-header'); el(head, 'strong', '', entry.author); el(head, 'span', 'li-muted', `${date(entry.createdAt)}${entry.updatedAt !== entry.createdAt ? ' · 已编辑' : ''}`); el(head, 'div', 'li-spacer'); const content = el(comment, 'div', 'li-description-content'); const edit = action(head, '编辑', () => safe(() => this.afterEditing(() => { edit.hidden = true; content.replaceChildren(); const text = this.editor(content, entry.body, issue.id, entry.path); const buttons = text.actions; this.startEditing(text.element, `评论 · ${entry.author} · ${date(entry.createdAt)} · ${entry.body.replace(/\s+/g, ' ').slice(0, 40)}`, () => text.value !== entry.body || text.uploading, () => { text.destroy(); content.replaceChildren(); this.markdown(content, entry.body, entry.path); edit.hidden = false; }); action(buttons, '取消', () => { this.stopEditing(true); if (this.pending) safe(() => this.draw()); }); const save = action(buttons, '保存', () => safe(async () => { if (!text.value.trim()) throw new Error('评论不能为空'); if (text.uploading) throw new Error('附件正在保存，请稍后保存'); save.disabled = true; try { await this.host.store.editComment(entry.id, text.value, entry.revision ?? entry.updatedAt); this.stopEditing(); await this.draw(); } finally { save.disabled = false; } }), 'mod-cta'); text.focus(); })), 'li-subtle'); action(head, '笔记', () => safe(() => this.host.openNote(entry.path)), 'li-subtle'); action(head, '删除', () => this.deleteComment(comment, entry), 'li-subtle li-delete-comment'); this.markdown(content, entry.body, entry.path); } }
+    for (const entry of entries) { if (entry.kind === 'event') { const event = el(timeline, 'div', 'li-event'); pill(event, entry.to || 'open'); el(event, 'span', '', `${entry.author} ${entry.body}`); el(event, 'span', 'li-muted', date(entry.createdAt)); } else { const comment = el(timeline, 'article', 'li-comment'); comment.dataset.commentId = entry.id; const head = el(comment, 'div', 'li-comment-header'); el(head, 'strong', '', entry.author); el(head, 'span', 'li-muted', `${date(entry.createdAt)}${entry.updatedAt !== entry.createdAt ? ' · 已编辑' : ''}`); el(head, 'div', 'li-spacer'); const content = el(comment, 'div', 'li-description-content'); const edit = action(head, '编辑', () => safe(() => this.afterEditing(() => { edit.hidden = true; content.replaceChildren(); const text = this.editor(content, entry.body, issue.id, entry.path); const buttons = text.actions; const draft = this.cacheForm(text.element, `comment:${entry.id}`, entry.revision ?? entry.updatedAt); this.startEditing(text.element, `评论 · ${entry.author} · ${date(entry.createdAt)} · ${entry.body.replace(/\s+/g, ' ').slice(0, 40)}`, () => text.value !== entry.body || text.uploading, () => { text.destroy(); content.replaceChildren(); this.markdown(content, entry.body, entry.path); edit.hidden = false; }); action(buttons, '取消', () => { this.stopEditing(true); if (this.pending) safe(() => this.draw()); }); const save = action(buttons, '保存', () => safe(async () => { if (!text.value.trim()) throw new Error('评论不能为空'); if (text.uploading) throw new Error('附件正在保存，请稍后保存'); save.disabled = true; try { const submitted = draft.snapshot(); await this.host.store.editComment(entry.id, text.value, draft.revision); draft.complete(submitted); this.stopEditing(); await this.draw(); } finally { save.disabled = false; } }), 'mod-cta'); text.focus(); })), 'li-subtle'); action(head, '笔记', () => safe(() => this.host.openNote(entry.path)), 'li-subtle'); action(head, '删除', () => this.deleteComment(comment, entry), 'li-subtle li-delete-comment'); this.markdown(content, entry.body, entry.path); } }
     const compose = () => {
       const composer = el(main, 'section', 'li-composer'); el(composer, 'h3', '', '发表评论'); const editor = this.editor(composer, this.drafts.get(issue.id) || '', issue.id, issue.path, value => this.drafts.set(issue.id, value)); const status = el(editor.element, 'div', 'li-composer-status'); status.setAttribute('role', 'status'); const footer = editor.actions;
       if (!this.phone) {
         let closeReason: CloseReason = 'completed'; if (issue.status !== 'closed') select(footer, Object.entries(CLOSE_REASON_NAMES) as [string, string][], closeReason, value => { closeReason = value as CloseReason; });
         const close = action(footer, issue.status === 'closed' ? '重新打开 Issue' : '关闭 Issue', () => safe(() => this.afterEditing(async () => { close.disabled = true; try { await this.host.store.updateIssue(issue.id, { status: issue.status === 'closed' ? 'open' : 'closed', ...(issue.status !== 'closed' ? { closeReason } : {}), actor: this.host.author }, issue.revision ?? issue.updatedAt); await this.draw(); } finally { close.disabled = false; } })));
       }
+      const draft = this.cacheForm(editor.element, `new-comment:${issue.id}`);
       const send = async () => {
         if (this.submittingComment) return;
         const feedback = (message: string) => { status.textContent = message; new Notice(message); };
@@ -513,7 +522,7 @@ export class IssuesView extends ItemView {
         if (editor.uploading) { feedback('附件正在保存，请稍后发表评论'); return; }
         this.submittingComment = true; submit.disabled = true; submit.textContent = '正在发表…'; status.textContent = '正在发表评论…';
         try {
-          await this.host.store.addComment(issue.id, editor.value, this.host.author);
+          const submitted = draft.snapshot(); await this.host.store.addComment(issue.id, editor.value, this.host.author); draft.complete(submitted);
           editor.clear(); this.drafts.delete(issue.id); this.submittingComment = false; this.stopEditing();
           await this.draw(); new Notice('评论已发表');
         } catch (error) { status.textContent = `发表失败：${error instanceof Error ? error.message : String(error)}`; throw error; }
@@ -528,32 +537,32 @@ export class IssuesView extends ItemView {
         editor.focus();
       }
     };
-    if (this.phone) action(this.phone.actions, this.drafts.get(issue.id) ? '继续评论' : '评论', () => safe(() => this.afterEditing(compose)), 'mod-cta'); else compose();
+    if (this.phone) action(this.phone.actions, this.drafts.get(issue.id) || this.draftCache.read(`new-comment:${issue.id}`) ? '继续评论' : '评论', () => safe(() => this.afterEditing(compose)), 'mod-cta'); else compose();
     el(sidebar, 'h3', '', '属性'); const stateField = this.field(sidebar, '状态'); select(stateField, stateOptions, stateValue(issue), value => { const stateSelect = stateField.querySelector('select')!; stateSelect.value = stateValue(issue); safe(() => this.afterEditing(async () => { await this.host.store.updateIssue(issue.id, { ...statePatch(value), actor: this.host.author }, issue.revision ?? issue.updatedAt); await this.draw(); })); });
-    this.editableProperty(sidebar, issue, '标签', issue.labels.join('、'), area => {
-      const field = this.listInput(area, '多个标签用逗号分隔', issue.labels, this.data.issues.filter(i => i.projectId === issue.projectId).flatMap(i => i.labels));
+    this.editableProperty(sidebar, issue, '标签', issue.labels.join('、'), (area, current) => {
+      const field = this.listInput(area, '多个标签用逗号分隔', current.labels, this.data.issues.filter(i => i.projectId === issue.projectId).flatMap(i => i.labels));
       return () => ({ labels: words(field.value) });
     });
-    this.editableProperty(sidebar, issue, '里程碑', issue.milestone, area => {
-      const field = input(area, '选择已有或输入新里程碑', issue.milestone);
+    this.editableProperty(sidebar, issue, '里程碑', issue.milestone, (area, current) => {
+      const field = input(area, '选择已有或输入新里程碑', current.milestone);
       this.suggestValues(field, this.data.issues.filter(i => i.projectId === issue.projectId).map(i => i.milestone));
       return () => ({ milestone: field.value.trim() });
     });
-    this.editableProperty(sidebar, issue, '负责人', issue.assignees.join('、'), area => {
-      const field = this.listInput(area, '姓名，用逗号分隔', issue.assignees, this.data.issues.flatMap(i => i.assignees));
+    this.editableProperty(sidebar, issue, '负责人', issue.assignees.join('、'), (area, current) => {
+      const field = this.listInput(area, '姓名，用逗号分隔', current.assignees, this.data.issues.flatMap(i => i.assignees));
       return () => ({ assignees: words(field.value) });
     });
-    this.editableProperty(sidebar, issue, '截止日期', issue.dueDate, area => {
-      const field = input(area, '截止日期', issue.dueDate); field.type = 'date';
+    this.editableProperty(sidebar, issue, '截止日期', issue.dueDate, (area, current) => {
+      const field = input(area, '截止日期', current.dueDate); field.type = 'date';
       return () => ({ dueDate: field.value });
     });
     const parent = this.data.issues.find(i => i.id === issue.parent);
-    this.editableProperty(sidebar, issue, '父议题', parent ? `#${parent.number} ${parent.title}` : '', area => {
-      const field = select(area, [['', '无'], ...(issue.parent && !parent ? [[issue.parent, issue.parent] as [string, string]] : []), ...this.data.issues.filter(i => i.id !== issue.id).map(i => [i.id, `${this.data.projects.find(p => p.id === i.projectId)?.title} #${i.number} ${i.title}`] as [string, string])], issue.parent, () => {});
+    this.editableProperty(sidebar, issue, '父议题', parent ? `#${parent.number} ${parent.title}` : '', (area, current) => {
+      const field = select(area, [['', '无'], ...(issue.parent && !parent ? [[issue.parent, issue.parent] as [string, string]] : []), ...this.data.issues.filter(i => i.id !== issue.id).map(i => [i.id, `${this.data.projects.find(p => p.id === i.projectId)?.title} #${i.number} ${i.title}`] as [string, string])], current.parent, () => {});
       return () => ({ parent: field.value });
     }, parent);
-    const depField = this.editableProperty(sidebar, issue, '依赖', issue.dependencies.length ? `${issue.dependencies.length} 个依赖` : '无依赖', area => {
-      const chosen = new Set(issue.dependencies);
+    const depField = this.editableProperty(sidebar, issue, '依赖', issue.dependencies.length ? `${issue.dependencies.length} 个依赖` : '无依赖', (area, current) => {
+      const chosen = new Set(current.dependencies);
       const chips = el(area, 'div', 'li-selected-dependencies');
       const search = input(area, '搜索依赖议题');
       const choices = el(area, 'div', 'li-property-choices');
@@ -597,14 +606,18 @@ export class IssuesView extends ItemView {
     field.addEventListener('input', update);
     return field;
   }
-  private editableProperty(sidebar: HTMLElement, issue: Issue, name: string, value: string, build: (area: HTMLElement) => () => IssuePatch, linked?: Issue) {
+  private editableProperty(sidebar: HTMLElement, issue: Issue, name: string, value: string, build: (area: HTMLElement, current: Issue) => () => IssuePatch, linked?: Issue) {
     const field = this.field(sidebar, name);
     const display = el(field, 'div', 'li-property-display');
     if (linked) action(display, value, () => safe(() => this.navigate(linked.projectId, linked.id)), 'li-subtle li-property-link');
     const change = action(display, linked ? '修改' : value || '未设置', () => safe(() => this.afterEditing(() => {
       display.hidden = true;
       const area = el(field, 'div', 'li-property-editor');
-      const read = build(area); const initial = JSON.stringify(read());
+      const key = `issue-field:${issue.id}:${name}`;
+      const patch = this.draftCache.read(key)?.extra;
+      const current = patch && typeof patch === 'object' ? { ...issue, ...patch } : issue;
+      const read = build(area, current); const initial = JSON.stringify(read());
+      const draft = this.cacheForm(area, key, issue.revision ?? issue.updatedAt, { read });
       const feedback = el(area, 'p', 'li-form-error'); feedback.setAttribute('role', 'alert');
       const controls = el(area, 'div', 'li-inline-actions');
       action(controls, '取消', () => { this.stopEditing(true); if (this.pending) safe(() => this.draw()); });
@@ -612,7 +625,7 @@ export class IssuesView extends ItemView {
         if (save.disabled) return;
         save.disabled = true; feedback.textContent = '';
         try {
-          await this.host.store.updateIssue(issue.id, { ...read(), actor: this.host.author }, issue.revision ?? issue.updatedAt);
+          const submitted = draft.snapshot(); await this.host.store.updateIssue(issue.id, { ...read(), actor: this.host.author }, draft.revision); draft.complete(submitted);
           this.stopEditing(); await this.draw();
         } catch (error) { feedback.textContent = error instanceof Error ? error.message : String(error); }
         finally { save.disabled = false; }
@@ -666,12 +679,14 @@ export class IssuesView extends ItemView {
     const description = this.editor(this.field(form, '项目说明 · Markdown'), project?.description || '', project?.id || '', project?.path || '');
     if (modal) modal.onClose = () => description.destroy();
     let status: ProjectStatus = project?.status || 'active'; select(this.field(form, '状态'), PROJECT_STATES.map(s => [s, STATUS_NAMES[s]]), status, value => { status = value as ProjectStatus; }); const due = input(this.field(form, '截止日期'), '', project?.dueDate); due.type = 'date';
+    const draft = this.cacheForm(form, project ? `project:${project.id}` : 'new-project', project?.revision ?? project?.updatedAt);
     const save = async () => {
       if (!title.value.trim()) throw new Error('请输入项目名称');
       if (description.uploading) throw new Error('附件正在保存，请稍后保存');
+      const submitted = draft.snapshot();
       const data = { title: title.value.trim(), description: description.value, status, dueDate: due.value };
-      const saved = project ? await this.host.store.updateProject(project.id, data, project.revision ?? project.updatedAt) : await this.host.store.createProject(data);
-      modal?.close(); if (this.phone) this.stopEditing(); await this.navigate(saved.id);
+      const saved = project ? await this.host.store.updateProject(project.id, data, draft.revision) : await this.host.store.createProject(data);
+      draft.complete(submitted); modal?.close(); if (this.phone) this.stopEditing(); await this.navigate(saved.id);
     };
     if (modal) { this.saveButton(modal, save); modal.open(); }
     else {
@@ -689,7 +704,7 @@ export class IssuesView extends ItemView {
     title.focus();
   }
   private issueModal(project: Project, issue?: Issue, defaults: Partial<IssueInput> = {}, inline?: HTMLElement, restore?: () => void) {
-    if (!issue && !inline) { safe(() => this.afterEditing(async () => { this.projectId = project.id; this.issueId = undefined; this.creating = { projectId: project.id, defaults }; await this.draw(); })); return; }
+    if (!issue && !inline) { safe(() => this.afterEditing(async () => { await this.leaf.setViewState({ type: VIEW_TYPE, state: { ...this.getState(), projectId: project.id, issueId: undefined, creating: { projectId: project.id, defaults } } }); })); return; }
     const modal = inline ? undefined : this.modal(`编辑 #${issue!.number}`);
     const frame = inline && !issue ? el(inline, 'div', 'li-create') : undefined;
     if (frame) { el(frame, 'h2', '', '创建新议题'); el(frame, 'p', 'li-muted li-create-hint', '记录问题、想法或需要完成的工作。'); }
@@ -715,10 +730,13 @@ export class IssuesView extends ItemView {
     const depField = this.field(properties, '依赖'); const selectedDeps = el(depField, 'div', 'li-selected-dependencies');
     const searchDeps = input(depField, '输入 @ 或 / 搜索议题'); searchDeps.setAttribute('aria-label', '搜索依赖议题');
     const suggestions = el(depField, 'div', 'li-dependency-suggestions'); suggestions.hidden = true;
-    const renderSelected = () => { selectedDeps.replaceChildren(); for (const id of dependencies) { const candidate = this.data.issues.find(i => i.id === id); const chip = el(selectedDeps, 'span', 'li-dependency-chip'); el(chip, 'span', '', candidate ? `#${candidate.number} ${candidate.title}` : id); const remove = action(chip, '', () => { dependencies.delete(id); renderSelected(); renderSuggestions(); }, 'li-icon-button', 'x'); remove.setAttribute('aria-label', `移除依赖 ${candidate?.title || id}`); remove.title = `移除依赖 ${candidate?.title || id}`; } };
-    const renderSuggestions = () => { const match = searchDeps.value.match(/^[@/](.*)$/); suggestions.replaceChildren(); suggestions.hidden = !match; if (!match) return; const query = match[1].trim().toLowerCase(); const candidates = this.data.issues.filter(i => i.id !== issue?.id && !dependencies.has(i.id) && `${this.data.projects.find(p => p.id === i.projectId)?.title || ''} #${i.number} ${i.title}`.toLowerCase().includes(query)).slice(0, 20); for (const candidate of candidates) { const name = this.data.projects.find(p => p.id === candidate.projectId)?.title || ''; action(suggestions, `${name} #${candidate.number} ${candidate.title}`, () => { dependencies.add(candidate.id); searchDeps.value = ''; renderSelected(); renderSuggestions(); searchDeps.focus(); }, 'li-dependency-option'); } if (!candidates.length) el(suggestions, 'div', 'li-muted', '没有匹配的议题'); };
+    const renderSelected = () => { selectedDeps.replaceChildren(); for (const id of dependencies) { const candidate = this.data.issues.find(i => i.id === id); const chip = el(selectedDeps, 'span', 'li-dependency-chip'); el(chip, 'span', '', candidate ? `#${candidate.number} ${candidate.title}` : id); const remove = action(chip, '', () => { dependencies.delete(id); renderSelected(); renderSuggestions(); form.dispatchEvent(new form.ownerDocument.defaultView!.Event('change')); }, 'li-icon-button', 'x'); remove.setAttribute('aria-label', `移除依赖 ${candidate?.title || id}`); remove.title = `移除依赖 ${candidate?.title || id}`; } };
+    const renderSuggestions = () => { const match = searchDeps.value.match(/^[@/](.*)$/); suggestions.replaceChildren(); suggestions.hidden = !match; if (!match) return; const query = match[1].trim().toLowerCase(); const candidates = this.data.issues.filter(i => i.id !== issue?.id && !dependencies.has(i.id) && `${this.data.projects.find(p => p.id === i.projectId)?.title || ''} #${i.number} ${i.title}`.toLowerCase().includes(query)).slice(0, 20); for (const candidate of candidates) { const name = this.data.projects.find(p => p.id === candidate.projectId)?.title || ''; action(suggestions, `${name} #${candidate.number} ${candidate.title}`, () => { dependencies.add(candidate.id); searchDeps.value = ''; renderSelected(); renderSuggestions(); form.dispatchEvent(new form.ownerDocument.defaultView!.Event('change')); searchDeps.focus(); }, 'li-dependency-option'); } if (!candidates.length) el(suggestions, 'div', 'li-muted', '没有匹配的议题'); };
     searchDeps.addEventListener('input', renderSuggestions); searchDeps.addEventListener('keydown', event => { if (event.key === 'Escape') { suggestions.hidden = true; } else if (event.key === 'Enter' && !suggestions.hidden) { event.preventDefault(); suggestions.querySelector('button')?.click(); } }); renderSelected();
-    const saveIssue = async () => { if (!issue && !title?.value.trim()) throw new Error('请输入 Issue 标题'); if (form.querySelector('[data-uploading]')) throw new Error('附件正在保存，请稍后保存'); const patch: IssuePatch = { ...(!issue ? { title: title!.value.trim(), body: body!.value } : {}), ...statePatch(currentState), labels: words(labels.value), milestone: milestone.value.trim(), assignees: words(assignees.value), dueDate: due.value, parent, dependencies: [...dependencies], actor: this.host.author }; const saved = issue ? await this.host.store.updateIssue(issue.id, patch, issue.revision ?? issue.updatedAt) : await this.host.store.createIssue(project.id, { ...patch, author: this.host.author, title: title!.value.trim() }); modal?.close(); this.stopEditing(); await this.navigate(project.id, saved.id); };
+    const draft = this.cacheForm(form, issue ? `issue-properties:${issue.id}` : `new-issue:${project.id}:${defaults.parent || ''}`, issue?.revision ?? issue?.updatedAt, {
+      read: () => [...dependencies], restore: value => { if (Array.isArray(value) && value.every(v => typeof v === 'string')) { dependencies.clear(); value.forEach(v => dependencies.add(v)); renderSelected(); } },
+    });
+    const saveIssue = async () => { if (!issue && !title?.value.trim()) throw new Error('请输入 Issue 标题'); if (form.querySelector('[data-uploading]')) throw new Error('附件正在保存，请稍后保存'); const submitted = draft.snapshot(); const patch: IssuePatch = { ...(!issue ? { title: title!.value.trim(), body: body!.value } : {}), ...statePatch(currentState), labels: words(labels.value), milestone: milestone.value.trim(), assignees: words(assignees.value), dueDate: due.value, parent, dependencies: [...dependencies], actor: this.host.author }; const saved = issue ? await this.host.store.updateIssue(issue.id, patch, draft.revision) : await this.host.store.createIssue(project.id, { ...patch, author: this.host.author, title: title!.value.trim() }); draft.complete(submitted); modal?.close(); this.creating = undefined; this.stopEditing(); await this.navigate(project.id, saved.id); };
     const formValue = () => JSON.stringify({ fields: [...form.querySelectorAll('input,select')].map(field => (field as HTMLInputElement).value), body: body?.value, currentState, parent, dependencies: [...dependencies] });
     const initialForm = formValue();
     if (inline) this.startEditing(frame || inline, issue ? '议题属性' : '新建议题', () => formValue() !== initialForm || !!body?.uploading, () => { body?.destroy(); this.creating = undefined; restore?.(); });
@@ -731,7 +749,8 @@ export class IssuesView extends ItemView {
     const text = input(this.field(modal.contentEl, options.label || title), options.placeholder || title, value);
     if (options.suggestions?.length) this.suggestValues(text, options.suggestions);
     if (options.hint) el(modal.contentEl, 'p', 'li-muted li-dialog-hint', options.hint);
-    this.saveButton(modal, async () => { await save(text.value); modal.close(); }); modal.open(); text.focus();
+    const draft = this.cacheForm(modal.contentEl, `text:${this.projectId || 'repo'}:${title}`);
+    this.saveButton(modal, async () => { const submitted = draft.snapshot(); await save(text.value); draft.complete(submitted); modal.close(); }); modal.open(); text.focus();
   }
   private suggestValues(control: HTMLInputElement, values: string[]) {
     const list = el(control.parentElement!, 'datalist'); list.id = `li-options-${++controlId}`; control.setAttribute('list', list.id);
@@ -745,7 +764,7 @@ export class IssuesView extends ItemView {
     const preview = el(container, 'div', 'li-editor-preview markdown-rendered'); preview.hidden = true;
     const footer = el(container, 'div', 'li-editor-footer');
     let disposed = false, uploads = 0;
-    const view = createLiveMarkdown(this.app, liveContainer, initial, sourcePath, value => changed?.(value), {
+    const view = createLiveMarkdown(this.app, liveContainer, initial, sourcePath, value => { changed?.(value); container.dispatchEvent(new container.ownerDocument.defaultView!.Event('li-editor-change', { bubbles: true })); }, {
       onSubmit: () => { if (!uploads) (actions.querySelector<HTMLButtonElement>('.mod-cta') || container.closest('.li-create')?.querySelector<HTMLButtonElement>('.li-inline-actions .mod-cta') || container.closest('.modal')?.querySelector<HTMLButtonElement>('.li-modal-actions .mod-cta'))?.click(); },
       onAttach: () => { if (ref) picker.click(); else new Notice('请先创建项目，再添加附件'); },
     });
@@ -773,6 +792,7 @@ export class IssuesView extends ItemView {
     if (Platform.isMobile) tools.insertBefore(attachButton, tools.children[2] || null);
     view.contentDOM.addEventListener('paste', event => { const list = [...(event.clipboardData?.files || [])]; if (!list.length) return; event.preventDefault(); safe(() => attach(list)); }, true);
     container.addEventListener('dragover', event => { if (event.dataTransfer?.types.includes('Files')) { event.preventDefault(); container.addClass('is-dragover'); } }); container.addEventListener('dragleave', () => container.removeClass('is-dragover')); container.addEventListener('drop', event => { container.removeClass('is-dragover'); const list = [...(event.dataTransfer?.files || [])]; if (!list.length) return; event.preventDefault(); safe(() => attach(list)); });
-    return { element: container, get value() { return getValue(); }, get uploading() { return uploads > 0; }, actions, focus, destroy, clear: () => { if (!disposed) view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: '' } }); } };
+    const editor = { element: container, get value() { return getValue(); }, setValue: (value: string) => { if (!disposed) view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value } }); }, get uploading() { return uploads > 0; }, actions, focus, destroy, clear: () => { if (!disposed) view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: '' } }); } };
+    this.editors.set(container, editor); return editor;
   }
 }

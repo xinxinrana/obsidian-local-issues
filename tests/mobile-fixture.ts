@@ -3,15 +3,17 @@ import { EditorView } from '@codemirror/view';
 import * as mock from './obsidian-mock.cjs';
 
 /** In-memory public host surfaces; no disk, network, Node APIs, or real vault. */
-export async function createMobileFixture() {
+export async function createMobileFixture(persisted?: { files: Map<string, string>; binary: Map<string, Uint8Array>; folders: Set<string>; storage: Map<string, string> }) {
   Object.assign(mock.Platform, { isMobile: true, isDesktopApp: false, isIosApp: true });
   mock.installDom(window); document.body.classList.add('is-mobile');
-  const files = new Map<string, string>(), binary = new Map<string, Uint8Array>(), folders = new Set<string>(), trashed: string[] = [];
+  const files = persisted?.files || new Map<string, string>(), binary = persisted?.binary || new Map<string, Uint8Array>(), folders = persisted?.folders || new Set<string>(), storage = persisted?.storage || new Map<string, string>(), trashed: string[] = [];
   const changed: (() => void)[] = [], ready: (() => void)[] = [], leaves: any[] = [];
   const notify = () => changed.forEach(fn => fn());
   const file = (path: string) => files.has(path) || binary.has(path) ? Object.assign(new mock.TFile(path), { stat: { size: files.get(path)?.length || binary.get(path)?.length || 0 } }) : folders.has(path) ? { path } : null;
   let plugin: any;
   const app: any = {
+    loadLocalStorage: (key: string) => storage.has(key) ? JSON.parse(storage.get(key)!) : null,
+    saveLocalStorage: (key: string, value: unknown) => { if (value === null) storage.delete(key); else storage.set(key, JSON.stringify(value)); },
     savedData: { apiEnabled: true, port: 27183, root: 'Local Issues', author: '我', shares: {} },
     vault: {
       configDir: '.obsidian', getName: () => '手机笔记库', getMarkdownFiles: () => [...files.keys()].filter(p => p.endsWith('.md')).map(file), getAbstractFileByPath: file,
@@ -39,7 +41,7 @@ export async function createMobileFixture() {
   plugin = new Plugin(app, { id: 'local-issues', version: '0.2.5', dir: '.obsidian/plugins/local-issues' });
   await plugin.onload(); ready.forEach(fn => fn()); await plugin.activate();
   const fixture = {
-    app, plugin, files, binary, trashed, mock,
+    app, plugin, files, binary, trashed, mock, persistence: { files, binary, folders, storage },
     get view() { return leaves[0].view; },
     setMarkdown(container: Element, value: string) {
       const element = container.querySelector<HTMLElement>('.cm-editor')!;

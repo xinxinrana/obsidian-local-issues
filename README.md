@@ -32,6 +32,8 @@ Project descriptions, issue bodies and comments share a live Markdown editor in 
 
 On phones, the navigation and primary actions stay in place while lists and conversations scroll inside the page. Search stays compact, with sorting, grouping and view options behind **筛选**. Projects use a card layout and issue properties collapse above the conversation. Create and edit projects, issues and comments, change status and select attachments inside Obsidian. Creating and editing opens a focused page with Cancel and Save at the top; the editor offers Write, Preview and Attachments and adapts to the on-screen keyboard. Sharing, Agent commands, the CLI and the local API are desktop features and are hidden on phones. Data stays in the same vault and follows its existing sync setup.
 
+In Obsidian, create and edit forms cache each input on the current device. Reopen the corresponding form after switching notes, closing a view or restarting to continue its draft, including raw Markdown, unfinished fields and attachment references. A successful save or comment submission clears that draft; failed saves and revision conflicts preserve it. These drafts are device-local and do not sync with the vault.
+
 ## Agent CLI
 
 The CLI requires Node.js 22+ and a running desktop Obsidian instance with Local Issues enabled.
