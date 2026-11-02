@@ -268,3 +268,70 @@ body:has(.li-no-tooltips:hover) .tooltip,
 
 .local-issues .li-editor-toolbar kbd { font-size: 10px; margin-inline-start: 4px; opacity: .7; }
 .local-issues .li-editor-toolbar [aria-pressed="true"] { background: var(--background-modifier-hover); color: var(--text-normal); }
+
+/* Phone reading and editing: content stays in the pane; tables/toolbars scroll locally. */
+.is-mobile .local-issues .li-shell {
+  padding: 12px max(12px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+}
+.is-mobile .local-issues .li-topbar { margin-top: -12px; padding-block: 6px; gap: 4px; }
+.is-mobile .local-issues :is(button, select, input:not([type="checkbox"]):not([type="file"])) {
+  min-height: 44px; max-width: 100%;
+}
+.is-mobile .local-issues button { touch-action: manipulation; white-space: normal; }
+.is-mobile .local-issues :is(input, select, textarea, .cm-content) { font-size: 16px; }
+.is-mobile .local-issues :is(.li-heading, .li-detail-header) { align-items: center; gap: 8px; }
+.is-mobile .local-issues .li-heading-actions { gap: 4px; flex-wrap: wrap; min-width: 0; }
+.is-mobile .local-issues .li-detail-title { flex-basis: calc(100% - 64px); }
+.is-mobile .local-issues .li-detail-actions { margin-inline-start: 0; }
+.is-mobile .local-issues .li-editing-location { max-width: 100%; flex-basis: 100%; text-align: start; }
+.is-mobile .local-issues .li-toolbar { gap: 6px; }
+.is-mobile .local-issues .li-toolbar > select { flex: 1 1 130px; min-width: 0; }
+.is-mobile .local-issues .li-topbar .li-breadcrumb { min-width: 0; }
+.is-mobile .local-issues .li-project-cards { display: grid; gap: 12px; }
+.is-mobile .local-issues .li-project-card { border: 1px solid var(--li-border); border-radius: var(--radius-m); padding: 12px; min-width: 0; }
+.is-mobile .local-issues .li-project-card-heading { display: flex; align-items: flex-start; gap: 8px; }
+.is-mobile .local-issues .li-project-card-heading .li-project-title { flex: 1; }
+.is-mobile .local-issues .li-project-card > p { margin-block: 6px; overflow-wrap: anywhere; }
+.is-mobile .local-issues .li-project-card-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.is-mobile .local-issues .li-board { grid-template-columns: minmax(0, 1fr); overflow: visible; gap: 12px; }
+.is-mobile .local-issues .li-board-column { min-height: 0; min-width: 0; }
+.is-mobile .local-issues .li-card select { width: 100%; }
+.is-mobile .local-issues .li-detail { grid-template-columns: minmax(0, 1fr); gap: 14px; margin-top: 14px; }
+.is-mobile .local-issues .li-mobile-properties { order: -1; border-bottom: 1px solid var(--li-border); min-width: 0; }
+.is-mobile .local-issues .li-mobile-properties > summary { padding-block: 12px; min-height: 44px; cursor: pointer; font-weight: 600; }
+.is-mobile .local-issues .li-mobile-properties .li-sidebar { display: flex; flex-wrap: wrap; gap: 12px; border: 0; padding: 8px 0 16px; }
+.is-mobile .local-issues .li-mobile-properties .li-sidebar > h3 { display: none; }
+.is-mobile .local-issues .li-mobile-properties .li-field { flex: 1 1 160px; min-width: 0; max-width: 100%; margin: 0; }
+.is-mobile .local-issues .li-issue-row { padding: 12px; gap: 10px; }
+.is-mobile .local-issues .li-comment-header { flex-wrap: wrap; gap: 4px 8px; padding: 8px 12px; }
+.is-mobile .local-issues .li-markdown { padding: 12px; }
+.is-mobile .local-issues .li-markdown :is(img,video), .is-mobile .local-issues .image-embed { max-width: 100%; height: auto; }
+.is-mobile .local-issues .li-markdown pre, .is-mobile .local-issues .li-markdown table { max-width: 100%; overflow-x: auto; }
+.is-mobile .local-issues .li-markdown table { display: block; }
+.is-mobile .local-issues .li-editor-toolbar { flex-wrap: nowrap; gap: 4px; overflow-x: auto; max-width: 100%; padding: 6px 8px; }
+.is-mobile .local-issues .li-editor-toolbar button { flex: 0 0 auto; min-width: 44px; white-space: nowrap; }
+.is-mobile .local-issues .li-editor-toolbar kbd { display: none; }
+.is-mobile .local-issues .li-live-editor .cm-content { min-height: 140px; }
+.is-mobile .local-issues .li-live-editor .cm-scroller,
+.is-mobile .local-issues .li-editor-preview { max-height: min(48dvh, calc(var(--li-viewport-height, 100dvh) * .48)); }
+.is-mobile .local-issues .li-editor-footer { padding: 4px 10px 10px; }
+.is-mobile .local-issues .li-editor-actions { width: 100%; gap: 8px; }
+.is-mobile .local-issues .li-editor-actions :is(button,select) { flex: 1 1 auto; }
+.is-mobile .local-issues .li-form-grid { grid-template-columns: minmax(0,1fr); }
+.is-mobile .modal.li-modal-container {
+  position: fixed; top: calc(16px + env(safe-area-inset-top)); left: 8px; margin: 0;
+  width: calc(100% - 16px); max-width: calc(100% - 16px);
+  max-height: calc(var(--li-viewport-height, 100dvh) - 32px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+}
+.is-mobile .li-modal-container > .modal-header { padding: 16px 16px 12px; }
+.is-mobile .li-modal-container > .modal-content.local-issues.li-modal { padding-inline: 16px; }
+.is-mobile .li-modal-container > .li-modal-actions { padding: 10px 16px; flex-wrap: wrap; }
+.is-mobile .li-modal-container .li-modal-actions button { min-height: 44px; }
+.is-mobile .li-settings .setting-item { flex-wrap: wrap; gap: 10px; }
+.is-mobile .li-settings .setting-item-control { min-width: 0; flex-wrap: wrap; }
+.is-mobile .local-issues .li-touch-checkbox { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 44px; width: 44px; min-height: 44px; }
+.is-mobile .local-issues .li-touch-checkbox input { margin: 0; }
+.is-mobile .local-issues .li-select-all { min-height: 44px; }
+.is-mobile .modal.li-settings-modal { position: fixed; top: calc(16px + env(safe-area-inset-top)); left: 8px; width: calc(100% - 16px); margin: 0; max-width: calc(100% - 16px); max-height: calc(var(--li-viewport-height, 100dvh) - 32px); display: flex; flex-direction: column; overflow: hidden; }
+.is-mobile .li-settings-modal > .modal-content { min-height: 0; overflow-y: auto; }
+.is-mobile .li-settings :is(button,input,select) { min-height: 44px; font-size: 16px; }

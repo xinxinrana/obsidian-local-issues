@@ -4,6 +4,7 @@ const menus = [];
 function installDom(window) {
   const proto = window.HTMLElement.prototype;
   proto.empty = function () { this.replaceChildren(); };
+  proto.setCssProps = function (props) { for (const [key, value] of Object.entries(props)) this.style.setProperty(key, value); };
   proto.setText = function (s) { this.textContent = s; };
   proto.addClass = function (...names) { this.classList.add(...names.flatMap(n => n.split(' ')).filter(Boolean)); };
   proto.removeClass = function (...names) { this.classList.remove(...names); };
@@ -99,7 +100,7 @@ class Setting {
   }
 }
 module.exports = { installDom, Component, ItemView, Modal, AbstractInputSuggest, Menu, Notice, MarkdownRenderer,
-  Plugin, PluginSettingTab, Setting, TFile, FileSystemAdapter, Platform: { isMacOS: false },
+  Plugin, PluginSettingTab, Setting, TFile, FileSystemAdapter, Platform: { isMacOS: false, isMobile: false, isDesktopApp: true, isIosApp: false },
   setIcon(el, icon) { el.dataset.icon = icon; el.setAttribute('aria-hidden', 'true'); },
   normalizePath: s => s.replace(/\\/g, '/').replace(/\/{2,}/g, '/'), modals, notices, menus,
 };

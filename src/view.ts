@@ -1,6 +1,7 @@
 import { Platform, Component, ItemView, MarkdownRenderer, Modal, Notice, Menu, setIcon, WorkspaceLeaf, type ViewStateResult } from 'obsidian';
 import { createLiveMarkdown, MARKDOWN_TOOLS } from './live-markdown';
 import { suppressTooltips } from './tooltips';
+import { MobileModal, observeMobileViewport } from './mobile';
 import { ISSUE_STATUSES, STATUS_NAMES, CLOSE_REASON_NAMES, issueLink, CloseReason, Issue, IssueInput, IssuePatch, IssueStore, Project, ProjectStatus, Snapshot, TimelineEntry } from './types';
 
 export const VIEW_TYPE = 'local-issues-view';
@@ -56,12 +57,14 @@ export class IssuesView extends ItemView {
   private generation = 0;
   private pending = false;
   private closed = false;
+  private mobilePropertiesOpen = false;
+  private disposeViewport?: () => void;
   constructor(leaf: WorkspaceLeaf, private host: ViewHost) { super(leaf); this.navigation = true; }
   getViewType() { return VIEW_TYPE; }
   getDisplayText() { return 'Local Issues'; }
   getIcon() { return 'list-todo'; }
-  async onOpen() { this.closed = false; suppressTooltips(this.contentEl); this.renderScope.load(); await this.refresh(); }
-  async onClose() { this.closed = true; ++this.generation; this.deletePrompt?.close(); this.submissionNotice?.hide(); this.discardPrompt?.close(); this.stopEditing(); this.renderScope.unload(); }
+  async onOpen() { this.closed = false; this.disposeViewport?.(); this.disposeViewport = observeMobileViewport(this.contentEl); suppressTooltips(this.contentEl); this.renderScope.load(); await this.refresh(); }
+  async onClose() { this.closed = true; ++this.generation; this.disposeViewport?.(); this.disposeViewport = undefined; this.deletePrompt?.close(); this.submissionNotice?.hide(); this.discardPrompt?.close(); this.stopEditing(); this.renderScope.unload(); }
   getState() { return { projectId: this.projectId, issueId: this.issueId, query: this.query, projectState: this.state, issueState: this.issueState, mode: this.mode, label: this.label, milestone: this.milestone, sort: this.sort, group: this.group }; }
   getEphemeralState() { return { scrollTop: this.contentEl.scrollTop }; }
   setEphemeralState(state: { scrollTop?: number }) { if (typeof state?.scrollTop === 'number' && Number.isFinite(state.scrollTop)) this.contentEl.scrollTop = Math.max(0, state.scrollTop); }
@@ -183,18 +186,34 @@ export class IssuesView extends ItemView {
     return node;
   }
   private renderProjects(root: HTMLElement) {
-    const head = el(root, 'div', 'li-heading'); el(head, 'h2', '', '项目'); el(head, 'span', 'li-muted', `${this.data.projects.length} 个项目`); const actions = el(head, 'div', 'li-heading-actions'); action(actions, '复制仓库链接', () => safe(async () => { await navigator.clipboard.writeText(await this.host.resourceLink()); new Notice('已复制仓库链接'); }), '', 'link'); action(actions, '新建项目', () => this.projectModal(), 'mod-cta', 'plus');
+    const head = el(root, 'div', 'li-heading'); el(head, 'h2', '', '项目'); el(head, 'span', 'li-muted', `${this.data.projects.length} 个项目`); const actions = el(head, 'div', 'li-heading-actions'); if (!Platform.isMobile) action(actions, '复制仓库链接', () => safe(async () => { await navigator.clipboard.writeText(await this.host.resourceLink()); new Notice('已复制仓库链接'); }), '', 'link'); action(actions, '新建项目', () => this.projectModal(), 'mod-cta', 'plus');
     const searchRow = el(root, 'div', 'li-search-row'); const search = input(searchRow, '搜索项目', this.query); search.setAttribute('aria-label', '搜索项目'); search.addEventListener('change', () => { this.query = search.value; safe(() => this.draw()); }); search.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); this.query = search.value; safe(() => this.draw()); } });
     const tools = el(root, 'div', 'li-toolbar');
     select(tools, [['', '所有状态'], ...PROJECT_STATES.map(s => [s, STATUS_NAMES[s]] as [string, string])], this.state, value => { this.state = value; safe(() => this.draw()); });
     select(tools, [['updated', '最近更新'], ['title', '项目名称'], ['due', '截止日期']], this.sort, value => { this.sort = value; safe(() => this.draw()); });
     select(tools, [['', '不分组'], ['status', '按状态分组']], this.group, value => { this.group = value; safe(() => this.draw()); });
-    this.fieldsButton(tools, this.projectFields, [['progress', '进度'], ['count', 'Issues 数'], ['status', '状态'], ['due', '截止日期']]);
+    if (!Platform.isMobile) this.fieldsButton(tools, this.projectFields, [['progress', '进度'], ['count', 'Issues 数'], ['status', '状态'], ['due', '截止日期']]);
     const matching = this.data.projects.filter(p => `${p.title} ${p.description}`.toLowerCase().includes(this.query.toLowerCase()));
     const archived = matching.filter(p => p.status === 'archived');
     const projects = matching.filter(p => p.status !== 'archived' && (!this.state || p.status === this.state)).sort((a, b) => this.sort === 'title' ? a.title.localeCompare(b.title) : this.sort === 'due' ? (a.dueDate || '9999').localeCompare(b.dueDate || '9999') : b.updatedAt.localeCompare(a.updatedAt));
     if (this.group === 'status') projects.sort((a, b) => PROJECT_STATES.indexOf(a.status) - PROJECT_STATES.indexOf(b.status));
     if (!this.data.projects.length) { const empty = el(root, 'div', 'li-empty'); setIcon(el(empty, 'div', 'li-empty-icon'), 'folders'); el(empty, 'h3', '', '把想法变成项目'); el(empty, 'p', 'li-muted', '为每个项目记录 Issues、讨论和进度，所有内容保存在本地 Markdown 中。'); action(empty, '创建第一个项目', () => this.projectModal(), 'mod-cta', 'plus'); return; }
+    if (Platform.isMobile) {
+      const cards = el(root, 'div', 'li-project-cards');
+      let group = '';
+      for (const project of projects) {
+        if (this.group && group !== project.status) { group = project.status; el(cards, 'h3', 'li-section-heading', STATUS_NAMES[project.status]); }
+        const card = el(cards, 'article', 'li-project-card');
+        const heading = el(card, 'div', 'li-project-card-heading'); action(heading, project.title, () => safe(() => this.navigate(project.id)), 'li-project-title');
+        action(heading, '编辑', () => this.projectModal(project), 'li-subtle');
+        if (project.description) el(card, 'p', 'li-muted', project.description.split('\n')[0]);
+        const issues = this.data.issues.filter(i => i.projectId === project.id), done = issues.filter(i => i.status === 'closed').length;
+        const meta = el(card, 'div', 'li-project-card-meta'); pill(meta, project.status); el(meta, 'span', 'li-muted', `${done}/${issues.length} 个议题完成`);
+        if (project.dueDate) el(meta, 'span', 'li-muted', `截止 ${project.dueDate}`);
+      }
+      if (!projects.length) el(root, 'p', 'li-empty', archived.length ? '没有进行中的项目，已归档的在下方。' : '没有匹配的项目。');
+      this.renderArchived(root, archived); return;
+    }
     const table = el(root, 'table', 'li-table li-projects'); const tr = el(el(table, 'thead'), 'tr'); for (const name of ['项目', '进度', 'Issues', '状态', '截止', '']) el(tr, 'th', '', name); const body = el(table, 'tbody');
     let group = ''; for (const project of projects) { if (this.group && group !== project.status) { group = project.status; const cell = el(el(body, 'tr', 'li-group'), 'td', '', STATUS_NAMES[project.status]); cell.colSpan = 6; }
       const row = el(body, 'tr'); this.shareContextMenu(row, project.id, '项目'); const name = el(row, 'td'); action(name, project.title, () => safe(() => this.navigate(project.id)), 'li-project-title'); if (project.description) el(name, 'div', 'li-muted li-truncate', project.description.split('\n')[0]);
@@ -349,9 +368,11 @@ export class IssuesView extends ItemView {
     } finally { this.batching = false; await this.draw(); }
   }
   private shareContextMenu(target: HTMLElement, ref: string, kind: string) {
+    if (Platform.isMobile) return;
     target.addEventListener('contextmenu', event => { event.preventDefault(); const menu = new Menu(); menu.addItem(item => item.setTitle('分享给 Agent').onClick(() => safe(async () => { await navigator.clipboard.writeText(await this.host.resourceLink(ref)); new Notice(`已复制${kind}链接`); }))); menu.showAtMouseEvent(event); });
   }
   private moreButton(parent: HTMLElement, options: [string, () => void][], label: string) {
+    if (Platform.isMobile) options = options.filter(([title]) => !title.includes('分享') && !title.startsWith('复制'));
     const button = action(parent, '更多', () => undefined, 'li-subtle li-more', 'ellipsis'); button.setAttribute('aria-label', label);
     button.addEventListener('click', event => { const menu = new Menu(); for (const [title, run] of options) menu.addItem(item => item.setTitle(title).onClick(run)); menu.showAtMouseEvent(event); });
   }
@@ -362,8 +383,8 @@ export class IssuesView extends ItemView {
     const text = `${issue.title} ${issue.body} ${issue.labels.join(' ')} ${issue.number} ${this.data.timeline.filter(e => e.issueId === issue.id && e.kind === 'comment').map(e => e.body).join(' ')}`.toLowerCase();
     return this.query.match(/(?:[^\s"]+|"[^"]*")+/g)?.every(token => { const [key, ...parts] = token.split(':'); const value = parts.join(':').replace(/^"|"$/g, ''); if (key === 'state' || key === 'is') return value === 'open' ? issue.status !== 'closed' : value === 'closed' ? issue.status === 'closed' : issue.status === value; if (key === 'label') return issue.labels.some(l => l.toLowerCase() === value.toLowerCase()); if (key === 'milestone') return issue.milestone.toLowerCase() === value.toLowerCase(); if (key === 'assignee') return issue.assignees.some(a => a.toLowerCase() === value.toLowerCase()); return text.includes(token.replace(/^"|"$/g, '').toLowerCase()); }) ?? true;
   }
-  private checkbox(parent: HTMLElement, issue: Issue) { const checkbox = el(parent, 'input'); checkbox.type = 'checkbox'; checkbox.checked = this.selected.has(issue.id); checkbox.setAttribute('aria-label', `选择 #${issue.number}`); checkbox.addEventListener('change', () => { checkbox.checked ? this.selected.add(issue.id) : this.selected.delete(issue.id); safe(() => this.draw()); }); }
-  private issueCard(parent: HTMLElement, issue: Issue, board = false) { const card = el(parent, 'div', board ? 'li-card' : 'li-issue-row'); this.shareContextMenu(card, issue.id, '议题'); if (board) { card.draggable = true; card.addEventListener('dragstart', event => event.dataTransfer?.setData('text/local-issues', issue.id)); } else this.checkbox(card, issue); const content = el(card, 'div', 'li-issue-content'); const title = el(content, 'div', 'li-issue-title-row'); if (!board) pill(title, issue.status, issue.closeReason); action(title, issue.title, () => safe(() => this.navigate(issue.projectId, issue.id)), 'li-issue-title'); for (const label of issue.labels) el(title, 'span', 'li-label', label); const meta = el(content, 'div', 'li-muted li-issue-meta'); el(meta, 'span', '', `#${issue.number} · ${issue.author} · ${date(issue.updatedAt)}`); if (issue.milestone) { const milestone = el(meta, 'span', '', issue.milestone); prependIcon(milestone, 'milestone'); milestone.title = `里程碑：${issue.milestone}`; milestone.setAttribute('aria-label', milestone.title); } const comments = this.data.timeline.filter(e => e.issueId === issue.id && e.kind === 'comment').length; if (comments) { const count = el(meta, 'span', '', String(comments)); prependIcon(count, 'message-square'); count.title = `${comments} 条评论`; count.setAttribute('aria-label', count.title); } if (board) select(card, stateOptions, stateValue(issue), value => safe(async () => { await this.host.store.updateIssue(issue.id, { ...statePatch(value), actor: this.host.author }); await this.draw(); })); }
+  private checkbox(parent: HTMLElement, issue: Issue) { const target = Platform.isMobile ? el(parent, 'label', 'li-touch-checkbox') : parent; const checkbox = el(target, 'input'); checkbox.type = 'checkbox'; checkbox.checked = this.selected.has(issue.id); checkbox.setAttribute('aria-label', `选择 #${issue.number}`); checkbox.addEventListener('change', () => { checkbox.checked ? this.selected.add(issue.id) : this.selected.delete(issue.id); safe(() => this.draw()); }); }
+  private issueCard(parent: HTMLElement, issue: Issue, board = false) { const card = el(parent, 'div', board ? 'li-card' : 'li-issue-row'); this.shareContextMenu(card, issue.id, '议题'); if (board && !Platform.isMobile) { card.draggable = true; card.addEventListener('dragstart', event => event.dataTransfer?.setData('text/local-issues', issue.id)); } else if (!board) this.checkbox(card, issue); const content = el(card, 'div', 'li-issue-content'); const title = el(content, 'div', 'li-issue-title-row'); if (!board) pill(title, issue.status, issue.closeReason); action(title, issue.title, () => safe(() => this.navigate(issue.projectId, issue.id)), 'li-issue-title'); for (const label of issue.labels) el(title, 'span', 'li-label', label); const meta = el(content, 'div', 'li-muted li-issue-meta'); el(meta, 'span', '', `#${issue.number} · ${issue.author} · ${date(issue.updatedAt)}`); if (issue.milestone) { const milestone = el(meta, 'span', '', issue.milestone); prependIcon(milestone, 'milestone'); milestone.title = `里程碑：${issue.milestone}`; milestone.setAttribute('aria-label', milestone.title); } const comments = this.data.timeline.filter(e => e.issueId === issue.id && e.kind === 'comment').length; if (comments) { const count = el(meta, 'span', '', String(comments)); prependIcon(count, 'message-square'); count.title = `${comments} 条评论`; count.setAttribute('aria-label', count.title); } if (board) select(card, stateOptions, stateValue(issue), value => safe(async () => { await this.host.store.updateIssue(issue.id, { ...statePatch(value), actor: this.host.author }); await this.draw(); })); }
   private renderIssue(root: HTMLElement, issue: Issue) {
     const project = this.data.projects.find(p => p.id === issue.projectId)!;
     const header = el(root, 'div', 'li-detail-header'); this.shareContextMenu(header, issue.id, '议题'); const title = el(header, 'div', 'li-detail-title');
@@ -381,7 +402,18 @@ export class IssuesView extends ItemView {
       ['分享给 Agent', () => safe(async () => { await navigator.clipboard.writeText(await this.host.resourceLink(issue.id)); new Notice('已复制议题链接'); })],
     ], 'Issue 更多操作');
     const summary = el(root, 'div', 'li-issue-summary'); pill(summary, issue.status, issue.closeReason); el(summary, 'span', 'li-muted', `${issue.author} 创建于 ${date(issue.createdAt)} · ${this.data.timeline.filter(e => e.issueId === issue.id && e.kind === 'comment').length} 条评论`);
-    const detail = el(root, 'div', 'li-detail'); const main = el(detail, 'div', 'li-detail-main'); const sidebar = el(detail, 'aside', 'li-sidebar');
+    const detail = el(root, 'div', 'li-detail'); const main = el(detail, 'div', 'li-detail-main');
+    let sidebar: HTMLElement;
+    if (Platform.isMobile) {
+      const properties = el(detail, 'details', 'li-mobile-properties'); properties.open = this.mobilePropertiesOpen;
+      el(properties, 'summary', '', '属性与关联'); sidebar = el(properties, 'aside', 'li-sidebar');
+      properties.addEventListener('toggle', () => {
+        if (!properties.open && this.activeEdit && properties.contains(this.activeEdit.element)) {
+          properties.open = true;
+          safe(() => this.afterEditing(() => { this.mobilePropertiesOpen = false; properties.open = false; }));
+        } else this.mobilePropertiesOpen = properties.open;
+      });
+    } else sidebar = el(detail, 'aside', 'li-sidebar');
     const description = el(main, 'article', 'li-comment li-description'); const descriptionHead = el(description, 'div', 'li-comment-header'); el(descriptionHead, 'strong', '', issue.author); el(descriptionHead, 'span', 'li-muted', '描述'); el(descriptionHead, 'div', 'li-spacer');
     const content = el(description, 'div', 'li-description-content'); this.markdown(content, issue.body, issue.path);
     const edit = action(descriptionHead, '编辑', () => safe(() => this.afterEditing(() => {
@@ -596,7 +628,7 @@ export class IssuesView extends ItemView {
     const list = el(control.parentElement!, 'datalist'); list.id = `li-options-${++controlId}`; control.setAttribute('list', list.id);
     for (const value of [...new Set(values)].filter(Boolean).sort()) el(list, 'option').value = value;
   }
-  private modal(title: string) { const modal = new Modal(this.app); suppressTooltips(modal.modalEl); modal.modalEl.addClass('li-modal-container'); modal.contentEl.addClass('local-issues', 'li-modal'); modal.titleEl.setText(title); return modal; }
+  private modal(title: string) { const modal = new MobileModal(this.app); suppressTooltips(modal.modalEl); modal.modalEl.addClass('li-modal-container'); modal.contentEl.addClass('local-issues', 'li-modal'); modal.titleEl.setText(title); return modal; }
   private saveButton(modal: Modal, run: () => Promise<void>) { const buttons = el(modal.modalEl, 'div', 'li-modal-actions'); action(buttons, '取消', () => modal.close()); const feedback = el(modal.contentEl, 'p', 'li-form-error'); feedback.setAttribute('role', 'alert'); const save = action(buttons, '保存', () => safe(async () => { if (save.disabled) return; save.disabled = true; feedback.textContent = ''; try { if (modal.contentEl.querySelector('[data-uploading]')) throw new Error('附件正在保存，请稍后保存'); await run(); } catch (error) { feedback.textContent = error instanceof Error ? error.message : String(error); } finally { save.disabled = false; } }), 'mod-cta'); }
   private editor(parent: HTMLElement, initial: string, ref: string, sourcePath: string, changed?: (body: string) => void) {
     const container = el(parent, 'div', 'li-editor'); const tools = el(container, 'div', 'li-editor-toolbar');
@@ -618,7 +650,7 @@ export class IssuesView extends ItemView {
     write.addClass('is-active');
     for (const [command, label, shortcut] of MARKDOWN_TOOLS) {
       const button = action(tools, label, () => { liveContainer.hidden = false; preview.hidden = true; write.addClass('is-active'); previewButton.removeClass('is-active'); view.command(command); });
-      button.setAttribute('aria-label', shortcut ? `${label}（${shortcut}）` : label);
+      button.setAttribute('aria-label', shortcut && !Platform.isMobile ? `${label}（${shortcut}）` : label);
       if (shortcut) el(button, 'kbd', '', shortcut.replace('Cmd/Ctrl+', Platform.isMacOS ? '⌘' : 'Ctrl+'));
       button.addEventListener('mousedown', event => event.preventDefault());
       if (command === 'source') { const update = () => { button.setAttribute('aria-pressed', String(liveContainer.dataset.mode === 'source')); }; liveContainer.addEventListener('markdown-mode', update); update(); }
@@ -628,7 +660,8 @@ export class IssuesView extends ItemView {
     const actions = el(footer, 'div', 'li-editor-actions');
     const attach = async (list: File[]) => { uploads++; container.dataset.uploading = 'true'; uploadStatus.textContent = '正在保存附件…'; try { for (const file of list) { const saved = await this.host.store.attach(ref, file.name, new Uint8Array(await file.arrayBuffer())); if (!disposed) insert(`\n${saved.markdown}\n`); } } finally { if (--uploads === 0) { delete container.dataset.uploading; uploadStatus.textContent = ''; } } };
     picker.addEventListener('change', () => { const list = [...(picker.files || [])]; picker.value = ''; if (list.length) safe(() => attach(list)); });
-    const attachButton = action(tools, '附件 Cmd/Ctrl+Shift+U', () => { if (ref) picker.click(); else new Notice('请先创建项目，再添加附件'); }); attachButton.disabled = !ref;
+    const attachButton = action(tools, Platform.isMobile ? '附件' : '附件 Cmd/Ctrl+Shift+U', () => { if (ref) picker.click(); else new Notice('请先创建项目，再添加附件'); }); attachButton.disabled = !ref;
+    if (Platform.isMobile) tools.insertBefore(attachButton, tools.children[2] || null);
     view.contentDOM.addEventListener('paste', event => { const list = [...(event.clipboardData?.files || [])]; if (!list.length) return; event.preventDefault(); safe(() => attach(list)); }, true);
     container.addEventListener('dragover', event => { if (event.dataTransfer?.types.includes('Files')) { event.preventDefault(); container.addClass('is-dragover'); } }); container.addEventListener('dragleave', () => container.removeClass('is-dragover')); container.addEventListener('drop', event => { container.removeClass('is-dragover'); const list = [...(event.dataTransfer?.files || [])]; if (!list.length) return; event.preventDefault(); safe(() => attach(list)); });
     return { element: container, get value() { return getValue(); }, get uploading() { return uploads > 0; }, actions, focus, destroy, clear: () => { if (!disposed) view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: '' } }); } };

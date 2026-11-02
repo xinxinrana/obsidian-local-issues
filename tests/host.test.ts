@@ -45,14 +45,14 @@ test('bundled plugin registers native entry points; Vault adapter, protocol, API
       revealLeaf: async () => {}, openLinkText: async (p: string) => { openedNotes.push(p); },
     },
   };
-  const built = await build({ entryPoints: ['src/main.ts'], bundle: true, write: false, minify: true, format: 'cjs', platform: 'node', external: ['obsidian'], target: 'es2022', logLevel: 'silent' });
+  const built = await build({ entryPoints: ['src/main.ts'], bundle: true, write: false, minify: true, format: 'cjs', platform: 'browser', external: ['obsidian', 'node:*'], target: 'es2022', logLevel: 'silent' });
   const module = { exports: {} as any };
   vm.runInNewContext(built.outputFiles[0].text, { module, exports: module.exports,
     require: (id: string) => id === 'obsidian' ? mock : require(id),
     console, document: dom.window.document, window: dom.window, navigator, HTMLElement: dom.window.HTMLElement, HTMLImageElement: dom.window.HTMLImageElement, MutationObserver: dom.window.MutationObserver, Window: dom.window.Window, getComputedStyle: dom.window.getComputedStyle,
     HTMLInputElement: dom.window.HTMLInputElement, HTMLTextAreaElement: dom.window.HTMLTextAreaElement, HTMLLabelElement: dom.window.HTMLLabelElement, HTMLSelectElement: dom.window.HTMLSelectElement,
     Event: dom.window.Event, MouseEvent: dom.window.MouseEvent, Node: dom.window.Node, Element: dom.window.Element,
-    setTimeout, clearTimeout, setInterval, clearInterval, queueMicrotask, URL, URLSearchParams, Buffer, Uint8Array, ArrayBuffer,
+    setTimeout, clearTimeout, setInterval, clearInterval, queueMicrotask, URL, URLSearchParams, Buffer, Uint8Array, ArrayBuffer, TextEncoder, crypto: globalThis.crypto,
   }, { filename: 'main.js' });
   plugin = new module.exports.default(app, { id: 'local-issues', dir: '.obsidian/plugins/local-issues' });
   try {
