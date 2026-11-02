@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { sha256Hex, randomUUID } from './platform-crypto';
 import { parseDocument, Document } from 'yaml';
 import type { Issue, IssueInput, IssuePatch, IssueStore, IssueStatus, CloseReason, Project, ProjectInput, ProjectPatch, Resolved, Snapshot, TimelineEntry, VaultAdapter } from './types';
 
@@ -51,7 +51,7 @@ function matchesProject(project: Project, ref: string): boolean {
   return !!folder && (folder === ref || folder.replace(/-[0-9a-f]{8}$/i, '') === ref);
 }
 function unique<T>(items: T[], label: string): T { if (!items.length) throw new Error(`找不到${label}`); if (items.length > 1) throw new Error(`${label}不唯一，请使用完整双链或 ID`); return items[0]; }
-function revision(raw: string): string { return createHash('sha256').update(raw).digest('hex'); }
+const revision = sha256Hex;
 function link(path: string): string { return `[[${path.replace(/\.md$/, '')}]]`; }
 
 /** The Vault's Markdown files are authoritative; no hidden database or side index. */

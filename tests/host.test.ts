@@ -18,9 +18,9 @@ test('bundled plugin registers native entry points; Vault adapter, protocol, API
   const changed = () => events.forEach(fn => fn());
   let injectExternalEdit = false;
   const vault = {
-    configDir: '.obsidian', getName: () => 'Tests', getMarkdownFiles: () => [...files.keys()].map(p => new mock.TFile(p)),
+    configDir: '.obsidian', getName: () => 'Tests', getMarkdownFiles: () => [...files.keys()].filter(path => path.endsWith('.md')).map(p => new mock.TFile(p)),
     getAbstractFileByPath: (p: string) => files.has(p) || binary.has(p) ? Object.assign(new mock.TFile(p), { stat: { size: binary.get(p)?.byteLength || files.get(p)?.length || 0 } }) : null,
-    adapter: { exists: async (p: string) => files.has(p) || folders.has(p) || binary.has(p), read: async (p: string) => { if (!files.has(p)) throw new Error('文件不存在'); return files.get(p)!; } },
+    adapter: { write: async (p: string, value: string) => { files.set(p, value); }, mkdir: async (p: string) => { folders.add(p); }, list: async (p: string) => ({ files: [...files.keys()].filter(path => path.startsWith(p + '/')), folders: [] }), exists: async (p: string) => files.has(p) || folders.has(p) || binary.has(p), read: async (p: string) => { if (!files.has(p)) throw new Error('文件不存在'); return files.get(p)!; } },
     read: async (f: { path: string }) => files.get(f.path)!,
     readBinary: async (f: { path: string }) => Uint8Array.from(binary.get(f.path)!).buffer,
     createFolder: async (p: string) => { folders.add(p); },
@@ -45,14 +45,14 @@ test('bundled plugin registers native entry points; Vault adapter, protocol, API
       revealLeaf: async () => {}, openLinkText: async (p: string) => { openedNotes.push(p); },
     },
   };
-  const built = await build({ entryPoints: ['src/main.ts'], bundle: true, write: false, minify: true, format: 'cjs', platform: 'node', external: ['obsidian'], target: 'es2022', logLevel: 'silent' });
+  const built = await build({ entryPoints: ['src/main.ts'], bundle: true, write: false, minify: true, format: 'cjs', platform: 'browser', external: ['obsidian', 'node:*'], target: 'es2022', logLevel: 'silent' });
   const module = { exports: {} as any };
   vm.runInNewContext(built.outputFiles[0].text, { module, exports: module.exports,
     require: (id: string) => id === 'obsidian' ? mock : require(id),
     console, document: dom.window.document, window: dom.window, navigator, HTMLElement: dom.window.HTMLElement, HTMLImageElement: dom.window.HTMLImageElement, MutationObserver: dom.window.MutationObserver, Window: dom.window.Window, getComputedStyle: dom.window.getComputedStyle,
     HTMLInputElement: dom.window.HTMLInputElement, HTMLTextAreaElement: dom.window.HTMLTextAreaElement, HTMLLabelElement: dom.window.HTMLLabelElement, HTMLSelectElement: dom.window.HTMLSelectElement,
     Event: dom.window.Event, MouseEvent: dom.window.MouseEvent, Node: dom.window.Node, Element: dom.window.Element,
-    setTimeout, clearTimeout, setInterval, clearInterval, queueMicrotask, URL, URLSearchParams, Buffer, Uint8Array, ArrayBuffer,
+    setTimeout, clearTimeout, setInterval, clearInterval, queueMicrotask, URL, URLSearchParams, Buffer, Uint8Array, ArrayBuffer, TextEncoder, crypto: globalThis.crypto,
   }, { filename: 'main.js' });
   plugin = new module.exports.default(app, { id: 'local-issues', dir: '.obsidian/plugins/local-issues' });
   try {

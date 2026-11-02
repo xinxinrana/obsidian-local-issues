@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400" role="img" aria-labelledby="title description">
+  <title id="title">Local Issues — 让项目与议题，留在自己的笔记库。</title>
+  <desc id="description">Local Issues 是 Obsidian 的本地项目与议题管理插件，支持议题、看板和持续讨论，数据保存在 Markdown 文件中。</desc>
+  <rect width="1200" height="400" rx="24" fill="#F8F5FD"/>
+  <path d="M64 337H1136" fill="none" stroke="#E7DEF3"/>
+  <g transform="translate(34 66)"><g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="51" y="13" width="165" height="151" rx="22" fill="#EEE6FA" stroke="#CDB8EF" stroke-width="7"/>
+    <path d="M53 34H174Q195 34 195 55V160Q195 181 174 181H101L58 207V181H53Q32 181 32 160V55Q32 34 53 34Z" fill="#FCFAFF" stroke="#8652CF" stroke-width="7"/>
+    <circle cx="77" cy="82" r="15" stroke="#299568" stroke-width="5.5"/>
+    <circle cx="77" cy="82" r="4" fill="#299568"/>
+    <path d="M116 82H157" stroke="#8652CF" stroke-opacity=".5" stroke-width="7"/>
+    <circle cx="77" cy="135" r="15" stroke="#8652CF" stroke-width="5.5"/>
+    <path d="M70 135L75 140L85 129" stroke="#8652CF" stroke-width="4.5"/>
+    <path d="M116 135H157" stroke="#8652CF" stroke-opacity=".5" stroke-width="7"/>
+  </g></g>
+  <text x="306" y="102" fill="#8A749F" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="600" letter-spacing="2.2">PROJECT TRACKING IN OBSIDIAN</text>
+  <text x="299" y="208" fill="#352647" font-family="Arial, Helvetica, sans-serif" font-size="96" font-weight="700" letter-spacing="-4">Local <tspan fill="#8652CF">Issues</tspan></text>
+  <text x="306" y="266" fill="#765A99" font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="26" letter-spacing="1">让项目与议题，留在自己的笔记库。</text>
+  <text x="66" y="370" fill="#8A749F" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="600" letter-spacing="1.8">PROJECTS / ISSUES / DISCUSSIONS</text>
+  <text x="1136" y="370" text-anchor="end" fill="#8A749F" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="600" letter-spacing="1.8">LOCAL DATA. MARKDOWN FILES.</text>
+</svg>

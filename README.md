@@ -4,7 +4,7 @@
 
 GitHub Issues-style project tracking inside an Obsidian vault. Organize projects, issues and ongoing discussions as local Markdown files that remain readable without the plugin.
 
-**Desktop only · Obsidian 1.14.4+ · Interface language: Simplified Chinese · MIT license**
+**Desktop, iOS and Android · Obsidian 1.14.4+ · Interface language: Simplified Chinese · MIT license**
 
 - Multiple projects with progress, search, filters, sorting and grouping.
 - Issue lists, Kanban boards and tables, with labels, milestones, assignees and due dates.
@@ -26,9 +26,13 @@ Download `local-issues.zip` from [Releases](https://github.com/xinxinrana/obsidi
 
 Alternatively, place `main.js`, `manifest.json` and `styles.css` from the same release into that plugin folder. The CLI is optional and distributed separately as `cli.mjs`; the complete ZIP includes it.
 
-Open the ribbon button **Local Issues：项目**, or run **Local Issues：打开项目** in the command palette. Create a project, then create its first issue. The **更多** menus contain note and sharing actions. In the issue editor, expand **属性与关联** to set labels, milestones, assignees and relationships.
+Open the ribbon button **Local Issues：项目**, or run **Local Issues：打开项目** in the command palette. Create a project, then create its first issue. The **更多** menus contain note actions and, on desktop, sharing actions. In the issue editor, expand **属性与关联** to set labels, milestones, assignees and relationships.
 
 Project descriptions, issue bodies and comments share a live Markdown editor in Obsidian and the browser. Headings, quotes, task items, inline formatting and local images render in place. Use `Cmd/Ctrl+B` for bold, `Cmd/Ctrl+I` for italic, `Cmd/Ctrl+K` for a link, and `Cmd/Ctrl+/` for source mode. Switching modes preserves selection and undo history. `Tab` and `Shift+Tab` indent lists and otherwise keep normal focus navigation. `Cmd/Ctrl+Enter` submits; `Cmd/Ctrl+Shift+U` selects attachments. Tables remain editable as source. Create a project before adding attachments.
+
+On phones, the navigation and primary actions stay in place while lists and conversations scroll inside the page. Search stays compact, with sorting, grouping and view options behind **筛选**. Projects use a card layout and issue properties collapse above the conversation. Create and edit projects, issues and comments, change status and select attachments inside Obsidian. Creating and editing opens a focused page with Cancel and Save at the top; the editor offers Write, Preview and Attachments and adapts to the on-screen keyboard. Sharing, Agent commands, the CLI and the local API are desktop features and are hidden on phones. Data stays in the same vault and follows its existing sync setup.
+
+In Obsidian, create and edit forms cache each input on the current device. Reopen the corresponding form after switching notes, closing a view or restarting to continue its draft, including raw Markdown, unfinished fields and attachment references. A successful save or comment submission clears that draft; failed saves and revision conflicts preserve it. Reopening Local Issues resumes the latest unfinished edit; **草稿** in the navigation lists recoverable inputs. An immediate device-local journal and separate files in the plugin’s `drafts/` directory preserve drafts independently of Obsidian view history and autosave. Device files are separate, and the backups can follow the plugin directory’s sync setup.
 
 ## Agent CLI
 
@@ -106,10 +110,12 @@ npm run build
 npm test
 ```
 
+For the mobile layout checks in headless WebKit, run `npx playwright install webkit` once, then `npm run test:mobile`. These checks cover portrait and landscape layouts, touch targets and reduced viewport height with the keyboard open.
+
 The build produces `main.js` and `cli.mjs`. Tests use temporary data and mocked Obsidian components; they do not access your vault. Release tags exactly match `manifest.json` versions, without a `v` prefix. Upload `main.js`, `manifest.json` and `styles.css` to each GitHub release; attach `cli.mjs` and the complete ZIP for CLI and manual installations.
 
 ## License and support
 
-[MIT](LICENSE). Bundled `yaml` uses the ISC license; see [third-party notices](THIRD_PARTY_NOTICES.txt). Demo screenshots contain synthetic example data.
+[MIT](LICENSE). Bundled `yaml` uses the ISC license and `@noble/hashes` uses the MIT license; see [third-party notices](THIRD_PARTY_NOTICES.txt). Demo screenshots contain synthetic example data.
 
 Report bugs and feature requests in [GitHub Issues](https://github.com/xinxinrana/obsidian-local-issues/issues).

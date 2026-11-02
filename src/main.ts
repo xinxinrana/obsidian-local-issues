@@ -1,12 +1,13 @@
-import { App, FileSystemAdapter, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, normalizePath, requestUrl } from 'obsidian';
-import { randomBytes } from 'node:crypto';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
-import { CliInstaller, CliInstallError, type CliProgress } from './cli-installer';
+import { App, FileSystemAdapter, Notice, Platform, Plugin, PluginSettingTab, Setting, TFile, normalizePath, requestUrl } from 'obsidian';
+import { MobileModal } from './mobile';
+import { randomUUID } from './platform-crypto';
+import { DraftJournal } from './draft-journal';
+import { Drafts } from './drafts';
+import type { CliInstaller, CliProgress } from './cli-installer';
 import { agentGuide, agentSkill } from './agent-skill';
 import { ResourceRoutes, slug } from './routes';
 import { Store } from './store';
-import { startApi } from './api';
+import type { startApi } from './api';
 import { IssuesView, VIEW_TYPE, type ViewHost } from './view';
 import { suppressTooltips } from './tooltips';
 import type { VaultAdapter } from './types';
@@ -20,6 +21,7 @@ interface Settings {
   projectSlugs?: Record<string, string>;
   shares: Record<string, { ref: string }>;
   cliNodePath?: string;
+  draftStorageId?: string;
 }
 const DEFAULTS: Settings = { root: 'Local Issues', author: '我', apiEnabled: false, port: 27183, shares: {} };
 
@@ -27,6 +29,8 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
   declare settings: Settings;
   store!: Store;
   routes!: ResourceRoutes;
+  draftCache!: Drafts;
+  draftJournal!: DraftJournal;
   private server?: Awaited<ReturnType<typeof startApi>>;
   private refreshTimer?: ReturnType<typeof setTimeout>;
   private unloaded = false;
@@ -39,7 +43,13 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
   private cliTask?: Promise<string>;
   private cliStatusVersion = 0;
   private cliListeners = new Set<() => void>();
+  private desktop?: Promise<typeof import('./desktop')>;
   get author(): string { return this.settings.author; }
+  get desktopAvailable(): boolean { return !Platform.isMobile; }
+  private desktopServices() {
+    if (!this.desktopAvailable) throw new Error('此功能仅在桌面端提供。');
+    return this.desktop ??= import('./desktop');
+  }
 
   async onload(): Promise<void> {
     const saved = await this.loadData();
@@ -49,16 +59,25 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
     this.settings.shares = Object.fromEntries(Object.entries(this.settings.shares).map(([id, entry]) => [id, { ref: entry.ref }]));
     this.settings.repoSlug ??= slug(this.app.vault.getName());
     this.settings.projectSlugs ??= {};
+    this.settings.draftStorageId ||= randomUUID();
     this.routes = new ResourceRoutes(this.settings.repoSlug, this.settings.projectSlugs, () => this.saveData(this.settings));
     await this.saveData(this.settings);
     this.configureStore();
+    let journal: Storage | undefined;
+    try { journal = window.localStorage; } catch { /* Use the independent disk replica. */ }
+    this.draftJournal = new DraftJournal({ prefix: `local-issues:${this.settings.draftStorageId}`, directory: `${this.manifest.dir || `${this.app.vault.configDir}/plugins/local-issues`}/drafts`, disk: this.app.vault.adapter,
+      journal, legacy: key => this.app.loadLocalStorage?.(key), warn: message => { new Notice(message, 0); } });
+    await this.draftJournal.initialize();
+    this.draftCache = new Drafts(this.draftJournal, message => { new Notice(message, 0); });
     this.registerView(VIEW_TYPE, leaf => new IssuesView(leaf, this));
     this.addRibbonIcon('list-todo', 'Local Issues：项目', () => { void this.activate().catch(this.report); });
     this.addCommand({ id: 'open-projects', name: '打开项目', callback: () => { void this.activate().catch(this.report); } });
-    this.addCommand({ id: 'copy-skill', name: '复制 Agent Skill', callback: () => { void this.copySkill(); } });
-    this.addCommand({ id: 'copy-guide', name: '复制给 Agent 的引导语（含 skill 安装说明）', callback: () => { void this.copyGuide(); } });
-    this.addCommand({ id: 'install-cli', name: '安装或修复 CLI', callback: () => { void this.installCli().catch(this.report); } });
-    this.addCommand({ id: 'remove-cli', name: '卸载 CLI 命令', callback: () => { void this.removeCli().catch(this.report); } });
+    if (this.desktopAvailable) {
+      this.addCommand({ id: 'copy-skill', name: '复制 Agent Skill', callback: () => { void this.copySkill(); } });
+      this.addCommand({ id: 'copy-guide', name: '复制给 Agent 的引导语（含 skill 安装说明）', callback: () => { void this.copyGuide(); } });
+      this.addCommand({ id: 'install-cli', name: '安装或修复 CLI', callback: () => { void this.installCli().catch(this.report); } });
+      this.addCommand({ id: 'remove-cli', name: '卸载 CLI 命令', callback: () => { void this.removeCli().catch(this.report); } });
+    }
     this.addCommand({ id: 'open-current-issue', name: '在项目中打开当前 Issue 笔记', checkCallback: checking => {
       const file = this.app.workspace.getActiveFile();
       if (!file || !file.path.startsWith(`${this.settings.root}/`)) return false;
@@ -71,7 +90,7 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
     });
     this.app.workspace.onLayoutReady(() => {
       if (this.unloaded) return;
-      void this.restartApi();
+      if (this.desktopAvailable) void this.restartApi();
     });
     for (const event of ['create', 'modify', 'delete', 'rename'] as const) {
       this.registerEvent(this.app.vault.on(event as 'modify', () => this.scheduleRefresh()));
@@ -118,7 +137,7 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
       removeFolder: async path => {
         path = safe(path);
         const folder = vault.getAbstractFileByPath(path);
-        if (folder) await vault.trash(folder, vault.adapter instanceof FileSystemAdapter);
+        if (folder) await vault.trash(folder, this.desktopAvailable && vault.adapter instanceof FileSystemAdapter);
       },
       writeBinary: async (path, data) => {
         path = safe(path); await folders(path);
@@ -132,9 +151,9 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
   async activate(projectId?: string, issueId?: string): Promise<void> {
     const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0];
     const leaf = existing ?? this.app.workspace.getLeaf('tab');
-    if (!existing) await leaf.setViewState({ type: VIEW_TYPE, active: true });
+    if (!existing) await leaf.setViewState({ type: VIEW_TYPE, active: true, state: projectId || issueId ? { projectId, issueId } : {} });
     await this.app.workspace.revealLeaf(leaf);
-    if (leaf.view instanceof IssuesView) await leaf.view.navigate(projectId, issueId);
+    if (existing && (projectId || issueId) && leaf.view instanceof IssuesView) await leaf.view.navigate(projectId, issueId);
   }
 
   async openReference(ref: string): Promise<void> {
@@ -150,7 +169,8 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
   }
 
   openSettings(): void {
-    const modal = new Modal(this.app);
+    const modal = new MobileModal(this.app);
+    modal.modalEl.addClass('li-settings-modal');
     modal.modalEl.addClass('li-settings');
     suppressTooltips(modal.modalEl);
     modal.setTitle('Local Issues 设置');
@@ -162,13 +182,14 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
   }
 
   async share(ref: string): Promise<string> {
+    if (!this.desktopAvailable) throw new Error('手机端仅提供本地人工读写。');
     if (!this.server) throw new Error('请先在 Local Issues 设置中启用本地 Agent API');
     const resolved = await this.store.resolve(ref);
     if (resolved.kind === 'note') throw new Error('只能分享项目或 Issue');
     const stableRef = resolved.value.id;
     let entry = Object.entries(this.settings.shares).find(([, s]) => s.ref === stableRef);
     if (!entry) {
-      const id = randomBytes(12).toString('hex');
+      const id = randomUUID().replace(/-/g, '');
       this.settings.shares[id] = { ref: stableRef };
       await this.saveData(this.settings);
       entry = [id, this.settings.shares[id]];
@@ -182,6 +203,7 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
   }
 
   private async cliPath(): Promise<string> {
+    if (!this.desktopAvailable) throw new Error('CLI 仅在桌面端提供。');
     const adapter = this.app.vault.adapter;
     const relativePath = `${this.manifest.dir ?? `${this.app.vault.configDir}/plugins/local-issues`}/cli.mjs`;
     if (!await adapter.exists(relativePath)) throw new Error('CLI 尚未安装，请在 Local Issues 设置点击「安装 CLI」。');
@@ -198,6 +220,7 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
   private origin(): string { return `http://localhost:${this.server?.port ?? this.settings.port}`; }
 
   private async cliInstaller(): Promise<CliInstaller> {
+    const { CliInstaller, homedir, join } = await this.desktopServices();
     const vault = await this.vaultPath();
     return new CliInstaller({ home: homedir(), vault, version: this.manifest.version, nodeHint: this.settings.cliNodePath,
       cancelled: () => this.unloaded,
@@ -247,6 +270,7 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
         }
         new Notice(this.cliMessage); return installer.command;
       } catch (error) {
+        const { CliInstallError } = await this.desktopServices();
         if (!this.cliProgress.some(step => step.state === 'error')) progress({ step: remove ? 'remove' : 'prepare', title: remove ? '卸载 CLI 命令' : '准备安装', state: 'error', detail: error instanceof Error ? error.message : String(error), help: error instanceof CliInstallError ? error.help : '请确认相关目录可读写后重试。', link: error instanceof CliInstallError ? error.link : undefined });
         throw error;
       } finally { this.cliBusy = false; this.cliTask = undefined; this.cliChanged(); }
@@ -257,11 +281,13 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
   async removeCli(): Promise<void> { await this.cliOperation(true); }
 
   async restartApi(): Promise<void> {
+    if (!this.desktopAvailable) return;
     this.apiQueue = this.apiQueue.catch(() => {}).then(async () => {
       if (this.server) { await this.server.close(); this.server = undefined; }
       this.apiError = '';
       if (!this.settings.apiEnabled || this.unloaded) return;
       try {
+        const { startApi } = await this.desktopServices();
         this.server = await startApi({ store: this.store, port: this.settings.port,
           vaultName: this.app.vault.getName(), routes: this.routes, shares: this.settings.shares,
           saveShares: () => this.saveData(this.settings), open: ref => this.openReference(ref), author: this.settings.author,
@@ -314,6 +340,7 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
 
   onunload(): void {
     this.unloaded = true;
+    void this.draftJournal?.flush().catch(this.report);
     this.cliListeners.clear();
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     void this.apiQueue.finally(() => this.server?.close()).catch(console.error);
@@ -337,6 +364,10 @@ class LocalIssuesSettings extends PluginSettingTab {
         if (!v || v.startsWith('/') || v.includes('\\') || v.split('/').some(s => !s || s === '.' || s === '..' || s.startsWith('.'))) return;
         p.settings.root = v; await p.saveSettings();
       }));
+    if (!p.desktopAvailable) {
+      el.createEl('p', { text: '项目、议题、评论和附件保存在当前笔记库，可沿用笔记库的同步方式在设备间读写。', cls: 'setting-item-description' });
+      return;
+    }
     new Setting(el).setName('本地 Agent API').setDesc('仅监听 127.0.0.1，供 CLI 和分享链接读写当前笔记库。')
       .addToggle(t => t.setValue(p.settings.apiEnabled).onChange(async value => { p.settings.apiEnabled = value; await p.saveSettings(); await p.restartApi(); this.display(); }));
     new Setting(el).setName('API 端口').setDesc(p.apiError || `http://127.0.0.1:${p.settings.port}`)
