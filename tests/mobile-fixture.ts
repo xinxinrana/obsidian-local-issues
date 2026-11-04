@@ -31,6 +31,12 @@ export async function createMobileFixture(persisted?: { files: Map<string, strin
       trash: async (folder: { path: string }, system: boolean) => { if (system) throw new Error('手机不能调用系统桌面废纸篓'); trashed.push(folder.path); for (const path of files.keys()) if (path.startsWith(folder.path + '/')) files.delete(path); },
       on: (_event: string, fn: () => void) => { changed.push(fn); return fn; },
     },
+    fileManager: { renameFile: async (entry: { path: string }, destination: string) => {
+      const source = entry.path;
+      for (const [path, value] of [...files]) if (path === source || path.startsWith(source + '/')) { files.set(destination + path.slice(source.length), value); files.delete(path); }
+      for (const path of [...folders]) if (path === source || path.startsWith(source + '/')) { folders.add(destination + path.slice(source.length)); folders.delete(path); }
+      notify(); await app.persist?.();
+    } },
     metadataCache: { getFirstLinkpathDest: (ref: string) => file(ref) || file(ref + '.md') },
     workspace: {
       onLayoutReady: (fn: () => void) => ready.push(fn), getActiveFile: () => null,

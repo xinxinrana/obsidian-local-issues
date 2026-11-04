@@ -64,8 +64,8 @@ try {
   await page.evaluate(() => fixture.setMarkdown(document.querySelector('.li-mobile-edit-page'), '中文输入与换行。\n\n' + '这是手机上的长段落。'.repeat(80)));
   await editPage.locator('input[type="file"]').setInputFiles({ name: '手机图片.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64') });
   await page.waitForFunction(() => fixture.binary.size === 1 && !document.querySelector('.li-mobile-edit-page [data-uploading]'));
-  await editPage.locator('img.li-live-image').waitFor();
-  const image = await editPage.locator('img.li-live-image').boundingBox(); assert.ok(image.width <= 378, '附件图片不得撑宽编辑区');
+  assert.equal(await editPage.locator('img.li-live-image').count(), 0, '编写时图片保持 Markdown，避免输入闪动');
+  assert.match(await editPage.locator('.cm-content').innerText(), /!\[\[resource\/local-issues\//);
   assert.deepEqual(await editPage.locator('.li-editor-toolbar button').allTextContents(), ['编写', '预览', '附件']);
   for (const name of ['编写', '预览', '附件']) {
     const bounds = await editPage.getByRole('button', { name, exact: true }).boundingBox(); assert.ok(bounds.height >= 44 && bounds.width >= 44, `${name} 触控区域不足`);
@@ -77,7 +77,7 @@ try {
   await page.locator('.li-description').getByRole('button', { name: '编辑', exact: true }).tap();
   await editPage.locator('.cm-editor').waitFor();
   await editPage.getByText('已恢复本机草稿', { exact: true }).waitFor();
-  assert.equal(await editPage.locator('img.li-live-image').count(), 1, '恢复草稿时保留图片附件引用');
+  assert.match(await editPage.locator('.cm-content').innerText(), /!\[\[resource\/local-issues\//, '恢复草稿时保留图片附件引用');
   await fits('恢复长文与图片草稿');
   // WKWebView can shrink only the visual viewport, retaining the layout height.
   await page.evaluate(() => { window.testViewportHeight = 430; Object.defineProperty(visualViewport, 'height', { get: () => testViewportHeight, configurable: true }); visualViewport.dispatchEvent(new Event('resize')); });

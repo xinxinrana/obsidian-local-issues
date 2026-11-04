@@ -212,8 +212,12 @@ export async function startApi(options: ApiOptions): Promise<{ close: () => Prom
         if (browserHtml) {
           await routes.sync(store);
           const snapshot = await store.snapshot();
-          const project = resource.project ? snapshot.projects.find(p => routes.projects[p.id] === resource.project) : undefined;
-          const issue = resource.kind === 'issue' ? snapshot.issues.find(i => i.projectId === project?.id && i.number === resource.number) : undefined;
+          let project = resource.project ? snapshot.projects.find(p => routes.projects[p.id] === resource.project) : undefined;
+          const issue = resource.kind === 'issue' ? await store.getIssue(String(resource.number), project?.id) : undefined;
+          if (issue && (issue.projectId !== project?.id || issue.number !== resource.number)) {
+            res.writeHead(302, { Location: await routes.path(store, issue.id) + url.search }); res.end(); return;
+          }
+          if (issue) project = snapshot.projects.find(p => p.id === issue.projectId);
           // Keep both tab counts within the current search/attribute filters.
           const query = new URLSearchParams(url.search); query.delete('state'); query.delete('status'); query.delete('limit');
           sendHtml(res, 200, renderPage({ snapshot, routes, vaultName: options.vaultName, url, project, issue, attachmentUrl, author: options.author,
@@ -301,9 +305,11 @@ export async function startApi(options: ApiOptions): Promise<{ close: () => Prom
           const issue = await store.getIssue(parts[2], project);
           if (parts.length === 3 && method === 'GET') data = await detail(issue.id);
           else if (parts.length === 3 && method === 'PATCH') { const body = await readBody(req); data = await store.updateIssue(issue.id, issueUpdate(body), expected(req, body)); }
+          else if (parts.length === 3 && method === 'DELETE') { const body = await readBody(req); await store.deleteIssue(issue.id, expected(req, body)); data = { deleted: true }; }
           else if (parts.length === 4 && method === 'POST') {
             const body = await readBody(req);
-            if (parts[3] === 'comments') { data = await store.addComment(issue.id, str(body.body, 'body'), typeof body.author === 'string' ? body.author : 'Agent'); status = 201; }
+            if (parts[3] === 'move') data = await store.moveIssue(issue.id, str(body.project, 'project'), expected(req, body));
+            else if (parts[3] === 'comments') { data = await store.addComment(issue.id, str(body.body, 'body'), typeof body.author === 'string' ? body.author : 'Agent'); status = 201; }
             else if (parts[3] === 'close' || parts[3] === 'reopen') data = await store.updateIssue(issue.id, { status: parts[3] === 'close' ? 'closed' : 'open', ...(typeof body.closeReason === 'string' && parts[3] === 'close' ? { closeReason: body.closeReason as IssuePatch['closeReason'] } : {}), actor: typeof body.actor === 'string' ? body.actor : typeof body.author === 'string' ? body.author : 'Agent' }, expected(req, body));
             else if (parts[3] === 'attachments') {
               data = await attach(issue.id, body); status = 201;

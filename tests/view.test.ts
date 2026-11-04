@@ -19,8 +19,9 @@ test('real view supports project → issue → Markdown comments, pasted and dro
   mock.notices.length = 0; mock.menus.length = 0;
   const files = new Map<string, string>(), binary = new Map<string, Uint8Array>();
   const adapter: VaultAdapter = { list: async () => [...files.keys()], read: async p => files.get(p)!,
-    write: async (p, text, expectedRaw) => { if (expectedRaw !== undefined && files.get(p) !== expectedRaw) throw new Error('写入冲突'); files.set(p, text); }, exists: async p => files.has(p) || binary.has(p),
+    write: async (p, text, expectedRaw) => { if (expectedRaw !== undefined && files.get(p) !== expectedRaw) throw new Error('写入冲突'); files.set(p, text); }, exists: async p => files.has(p) || binary.has(p) || [...files.keys()].some(key => key.startsWith(p + '/')),
     writeBinary: async (p, bytes) => { binary.set(p, bytes); },
+    rename: async (p, to) => { for (const [key, value] of [...files]) if (key === p || key.startsWith(p + '/')) { files.set(to + key.slice(p.length), value); files.delete(key); } },
     removeFolder: async p => { for (const key of [...files.keys()]) if (key.startsWith(`${p}/`)) files.delete(key); } };
   const store = new Store(adapter), copied: string[] = [], opened: string[] = [], shared: string[] = [];
   const app = { metadataCache: { getFirstLinkpathDest: () => null }, vault: { getMarkdownFiles: () => [...files.keys()].map(path => ({ path })) }, workspace: { openLinkText: async () => {} } };
@@ -50,7 +51,7 @@ test('real view supports project → issue → Markdown comments, pasted and dro
   };
   const menuAction = (name: string) => { const menu = mock.menus.at(-1); assert.ok(menu?.shown, '菜单应已显示'); menu.select(name); };
   const cm = (node: any) => node.cmTile.root.view;
-  const fill = (node: any, value: string) => { assert.ok(node); if (node.classList.contains('cm-content')) { const editor = cm(node); editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: value } }); } else { node.value = value; node.dispatchEvent(new dom.window.Event('input', { bubbles: true })); } };
+  const fill = (node: any, value: string) => { assert.ok(node); if (node.classList.contains('cm-content')) { const editor = cm(node); editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: value }, selection: { anchor: value.length } }); } else { node.value = value; node.dispatchEvent(new dom.window.Event('input', { bubbles: true })); } };
   const value = (node: any) => cm(node).state.doc.toString();
   const uploading = (node: any) => node.closest('.li-editor').dataset.uploading;
   try {
@@ -85,6 +86,20 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     assert.equal(issue.author, 'Evan'); assert.deepEqual(issue.labels, ['功能', '体验']);
     const composer = () => view.contentEl.querySelector('.li-composer') as HTMLElement;
     let text = composer().querySelector('.cm-content') as HTMLTextAreaElement;
+    assert.deepEqual([...composer().querySelectorAll('.li-editor-tabs button')].map(button => button.textContent), ['编写', '预览']);
+    assert.ok(composer().querySelector('.li-editor-formatting button'));
+    assert.equal(composer().querySelector('.li-select-control .li-icon')?.getAttribute('data-icon'), 'circle-check');
+    const reason = composer().querySelector<HTMLSelectElement>('select[aria-label="关闭原因"]')!;
+    reason.value = 'on-hold'; reason.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(composer().querySelector('.li-select-control .li-icon')?.getAttribute('data-icon'), 'circle-pause');
+    fill(text, '快捷键'); cm(text).dispatch({ selection: { anchor: 0, head: 3 } });
+    const shortcut = new dom.window.KeyboardEvent('keydown', { key: 'b', metaKey: true, cancelable: true });
+    Object.defineProperty(shortcut, 'target', { value: text });
+    const binding = view.scope.keys.find((binding: any) => binding.key === 'B');
+    assert.equal(binding.callback(shortcut, {}), false, '原生作用域处理后阻止全局快捷键抢占');
+    assert.equal(value(text), '**快捷键**'); assert.equal(shortcut.defaultPrevented, true);
+    const composing = new dom.window.KeyboardEvent('keydown', { key: 'b', metaKey: true, isComposing: true });
+    Object.defineProperty(composing, 'target', { value: text }); binding.callback(composing, {}); assert.equal(value(text), '**快捷键**');
     fill(text, '第一条评论');
     const paste = new dom.window.Event('paste', { bubbles: true, cancelable: true });
     let finishPaste!: (bytes: ArrayBuffer) => void; const pasteBytes = new Promise<ArrayBuffer>(resolve => { finishPaste = resolve; });
@@ -469,5 +484,24 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     click('移入废纸篓', deleting.modalEl);
     await until(async () => (await store.snapshot()).projects.length === 0, '归档项目可以直接删除');
     assert.ok(!view.contentEl.querySelector('.li-archived-row'), '删除后归档区消失');
+    const movingProject = await store.createProject({ title: '移动目标' });
+    const movingSource = await store.createProject({ title: '移动来源' });
+    const moving = await store.createIssue(movingSource.id, { title: '从界面移动与删除', body: '保留正文' });
+    await store.addComment(moving.id, '保留讨论');
+    await view.navigate(movingSource.id, moving.id);
+    view.contentEl.querySelector<HTMLButtonElement>('[aria-label="Issue 更多操作"]')!.click(); menuAction('移动议题');
+    await until(() => mock.modals.some((m: any) => m.titleEl.textContent === '移动议题'), '移动窗口');
+    let moveModal = mock.modals.at(-1); moveModal.contentEl.querySelector('select').value = movingProject.id;
+    moveModal.contentEl.querySelector('select').dispatchEvent(new dom.window.Event('change'));
+    click('保存', moveModal.modalEl);
+    await until(async () => (await store.getIssue(moving.id)).projectId === movingProject.id && !mock.modals.length, '移动议题保存');
+    await until(() => view.getState().projectId === movingProject.id, '进入移动后的项目');
+    view.contentEl.querySelector<HTMLButtonElement>('[aria-label="Issue 更多操作"]')!.click(); menuAction('删除议题');
+    await until(() => !!deleteDialog(), '删除议题确认'); click('取消', deleteDialog()!);
+    assert.equal((await store.getIssue(moving.id)).title, '从界面移动与删除');
+    view.contentEl.querySelector<HTMLButtonElement>('[aria-label="Issue 更多操作"]')!.click(); menuAction('删除议题');
+    await until(() => !!deleteDialog(), '再次确认删除议题'); click('确认删除', deleteDialog()!);
+    await until(async () => !(await store.snapshot()).issues.some(i => i.id === moving.id) && !deleteDialog(), '删除议题');
+    await until(() => !view.getState().issueId, '删除后回到项目列表');
   } finally { for (const modal of [...mock.modals]) modal.close(); await view.onClose(); dom.window.close(); }
 });

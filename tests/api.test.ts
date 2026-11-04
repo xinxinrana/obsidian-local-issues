@@ -3,6 +3,26 @@ import assert from 'node:assert/strict';
 import { request as httpRequest } from 'node:http';
 import { fixture } from './api-fixture';
 
+test('move and delete APIs preserve comments, reject stale writes and redirect old browser links', async () => {
+  const f = await fixture();
+  try {
+    const a = await f.store.createProject({ title: 'From' }), b = await f.store.createProject({ title: 'To' });
+    const issue = await f.store.createIssue(a.id, { title: 'Move me' });
+    const comment = await f.store.addComment(issue.id, 'Comment');
+    assert.equal((await f.request(`/api/issues/${issue.id}/move`, 'POST', { project: b.id }, { 'If-Match': 'stale' })).status, 409);
+    const moved = await f.request(`/api/issues/${issue.id}/move`, 'POST', { project: b.id }, { 'If-Match': issue.revision! });
+    assert.equal(moved.status, 200); assert.equal(moved.data.projectId, b.id);
+    assert.equal((await f.request(`/api/issues/${issue.id}`)).data.comments[0].id, comment.id);
+    const old = await fetch(f.url + '/from/issues/1', { headers: { Accept: 'text/html' }, redirect: 'manual' });
+    assert.equal(old.status, 302); assert.equal(old.headers.get('location'), '/to/issues/1');
+    assert.equal((await f.request('/from/issues/1')).data.issue.id, issue.id);
+    assert.equal((await f.request(`/api/issues/${issue.id}`, 'DELETE', {}, { 'If-Match': issue.revision! })).status, 409);
+    assert.equal((await f.request(`/api/issues/${issue.id}`, 'DELETE', {}, { 'If-Match': moved.data.revision })).data.deleted, true);
+    assert.equal((await f.request('/api/issues')).data.length, 0);
+    assert.equal((await f.request(`/api/issues/${issue.id}`)).status, 404);
+  } finally { await f.close(); }
+});
+
 test('API uses Markdown store for project → issue → comments, edits and state history', async () => {
   const f = await fixture();
   try {

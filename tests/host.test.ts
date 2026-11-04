@@ -60,12 +60,16 @@ test('bundled plugin registers native entry points; Vault adapter, protocol, API
     assert.ok(plugin.views.has('local-issues-view'));
     assert.ok(plugin.protocols.has('local-issues'));
     assert.ok(plugin.commands.some((c: any) => c.id === 'open-projects'));
+    assert.equal(plugin.commands.find((c: any) => c.id === 'open-local-issues').name, '打开 Local Issues');
     assert.equal(app.savedData.token, undefined); assert.equal(app.savedData.shares.old.key, undefined);
     const p = await plugin.store.createProject({ title: '主窗口项目', description: '项目说明' });
     const i = await plugin.store.createIssue(p.id, { title: '原生窗口中的 Issue', body: '[[普通笔记]]' });
     assert.ok(files.has(i.path));
     await plugin.activate(p.id, i.id);
     assert.match(dom.window.document.body.textContent!, /原生窗口中的 Issue/);
+    await plugin.commands.find((c: any) => c.id === 'open-local-issues').callback();
+    assert.equal(leaves.length, 1, '打开命令复用当前窗口');
+    assert.equal(leaves[0].view.getState().issueId, i.id, '打开命令与侧栏图标一致，保留当前阅读位置');
     await plugin.openNote(i.path); assert.equal(openedNotes[0], i.path);
     injectExternalEdit = true;
     await assert.rejects(plugin.store.updateIssue(i.id, { body: '不应覆盖' }, i.revision), /冲突/);

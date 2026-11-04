@@ -59,6 +59,7 @@ var HELP = `Local Issues \xB7 Obsidian \u672C\u5730\u9879\u76EE\u4E0E Issues
   issue list | view <\u7F16\u53F7/\u53CC\u94FE/ID/\u5206\u4EABURL> | create | edit <\u5F15\u7528>
   issue comment <\u5F15\u7528> | close <\u5F15\u7528> | reopen <\u5F15\u7528>
   issue attach <\u5F15\u7528> <\u6587\u4EF6> | share <\u5F15\u7528>
+  issue delete <\u5F15\u7528> | move <\u5F15\u7528> --to <\u76EE\u6807\u9879\u76EE>
   comment edit <\u8BC4\u8BBAID> --body "\u5185\u5BB9"
   comment delete <\u8BC4\u8BBAID>
   share view <\u5206\u4EABURL> | edit <\u5206\u4EABURL> | comment <\u5206\u4EABURL>
@@ -120,6 +121,8 @@ var COMMAND_HELP = {
   reopen <\u7F16\u53F7|\u94FE\u63A5>
   attach <\u7F16\u53F7|\u94FE\u63A5> <\u6587\u4EF6>
   share <\u7F16\u53F7|\u94FE\u63A5>
+  delete <\u7F16\u53F7|\u94FE\u63A5>
+  move <\u7F16\u53F7|\u94FE\u63A5> --to <\u76EE\u6807\u9879\u76EE>
 
 \u7F16\u53F7\u53EA\u5728\u9879\u76EE\u5185\u552F\u4E00\uFF1A\u8DE8\u9879\u76EE\u64CD\u4F5C\u8BF7\u5E26 -P\uFF0C\u6216\u76F4\u63A5\u4F20\u94FE\u63A5\u3002`,
   project: `\u7528\u6CD5: local-issues project <\u52A8\u4F5C>
@@ -144,7 +147,7 @@ var COMMAND_HELP = {
 var aliases = { c: "comments", P: "project", t: "title", b: "body", F: "body-file", l: "label", a: "assignee", s: "state", S: "search", L: "limit", h: "help", X: "method", f: "field", H: "header" };
 var booleans = /* @__PURE__ */ new Set(["help", "web", "comment", "comments", "version", "force"]);
 var multiples = /* @__PURE__ */ new Set(["label", "assignee", "depends-on", "add-label", "remove-label", "field", "header"]);
-var allowed = /* @__PURE__ */ new Set(["project", "title", "body", "body-file", "state", "status", "label", "assignee", "milestone", "parent", "depends-on", "due-date", "author", "search", "limit", "json", "web", "vault", "url", "if-match", "help", "method", "field", "header", "comment", "add-label", "remove-label", "description", "comments", "reason", "dir", "version", "force"]);
+var allowed = /* @__PURE__ */ new Set(["project", "title", "body", "body-file", "state", "status", "label", "assignee", "milestone", "parent", "depends-on", "due-date", "author", "search", "limit", "json", "web", "vault", "url", "if-match", "help", "method", "field", "header", "comment", "add-label", "remove-label", "description", "comments", "reason", "dir", "version", "force", "to"]);
 function parse(argv) {
   const args = [], flags = {};
   for (let i = 0; i < argv.length; i++) {
@@ -484,6 +487,8 @@ ${note}` : ""}`;
       data = await api.request(subPath(required(ref, "Issue \u5F15\u7528"), "comments"), "POST", { body: required(body(flags), "\u8BC4\u8BBA\u6B63\u6587\uFF08--body \u6216 --body-file\uFF09"), author: val(flags, "author") ?? "Agent" });
       warnMissingAuthor(flags);
     } else if (action === "close" || action === "reopen") data = await api.request(subPath(required(ref, "Issue \u5F15\u7528"), action), "POST", { ...action === "close" && val(flags, "reason") ? { closeReason: val(flags, "reason") } : {}, actor: val(flags, "author") ?? "Agent" });
+    else if (action === "delete") data = await api.request(issuePath(required(ref, "Issue \u5F15\u7528")), "DELETE");
+    else if (action === "move") data = await api.request(subPath(required(ref, "Issue \u5F15\u7528"), "move"), "POST", { project: required(val(flags, "to"), "\u76EE\u6807\u9879\u76EE\uFF08--to\uFF09") });
     else if (action === "attach") {
       const file = resolve(required(extra, "\u9644\u4EF6\u6587\u4EF6"));
       const attachment = await api.request(subPath(required(ref, "Issue \u5F15\u7528"), "attachments"), "POST", { name: basename(file), base64: readFileSync(file).toString("base64") });

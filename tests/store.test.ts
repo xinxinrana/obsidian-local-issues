@@ -7,9 +7,13 @@ class Memory implements VaultAdapter {
   files = new Map<string, string>();
   binary = new Map<string, Uint8Array>();
   async list() { return [...this.files.keys()]; }
-  async exists(path: string) { return this.files.has(path) || this.binary.has(path); }
+  async exists(path: string) { return this.files.has(path) || this.binary.has(path) || [...this.files.keys()].some(p => p.startsWith(path + '/')); }
   async read(path: string) { if (!this.files.has(path)) throw new Error('missing'); return this.files.get(path)!; }
   async write(path: string, content: string) { this.files.set(path, content); }
+  async rename(path: string, destination: string) {
+    if (await this.exists(destination)) throw new Error('目标已存在');
+    for (const [key, value] of [...this.files]) if (key === path || key.startsWith(path + '/')) { this.files.set(destination + key.slice(path.length), value); this.files.delete(key); }
+  }
   async writeBinary(path: string, data: Uint8Array) { this.binary.set(path, data); }
   async removeFolder(path: string) {
     for (const key of [...this.files.keys()]) if (key.startsWith(`${path}/`)) this.files.delete(key);
@@ -17,6 +21,71 @@ class Memory implements VaultAdapter {
   }
 }
 function setup() { const adapter = new Memory(); return { adapter, store: new Store(adapter) }; }
+
+test('issue deletion hides its timeline, preserves records and children, checks conflicts and never reuses numbers', async () => {
+  const { adapter, store } = setup();
+  const project = await store.createProject({ title: '删除议题' });
+  const issue = await store.createIssue(project.id, { title: '原议题', body: '原正文' });
+  const child = await store.createIssue(project.id, { title: '子议题', parent: issue.id, dependencies: [issue.id] });
+  const comment = await store.addComment(issue.id, '原评论');
+  const changed = await store.updateIssue(issue.id, { body: '更新正文' });
+  await assert.rejects(store.deleteIssue(issue.id, issue.revision), /冲突/);
+  await store.deleteIssue(issue.id, changed.revision);
+  const snap = await new Store(adapter).snapshot();
+  assert.deepEqual(snap.issues.map(i => i.id), [child.id]);
+  assert.equal(snap.timeline.length, 0); assert.equal(snap.issues[0].parent, ''); assert.deepEqual(snap.issues[0].dependencies, []);
+  assert.match(adapter.files.get(issue.path)!, /deletedAt:/); assert.match(adapter.files.get(issue.path)!, /更新正文/);
+  assert.match(adapter.files.get(comment.path)!, /原评论/);
+  await assert.rejects(store.getIssue(issue.id), /找不到/);
+  await assert.rejects(store.addComment(issue.id, '不能复活已删除议题'), /找不到/);
+  await store.deleteIssue(child.id);
+  assert.equal((await store.createIssue(project.id, { title: '新议题' })).number, 3);
+});
+
+test('moving issues preserves identity, comments, attachments, metadata, relations and old references across reconstruction', async () => {
+  const { adapter, store } = setup();
+  const source = await store.createProject({ title: '来源' }), target = await store.createProject({ title: '目标' });
+  await store.createIssue(target.id, { title: '已有议题' });
+  const parent = await store.createIssue(source.id, { title: '待移动', body: '正文', labels: ['P1'], milestone: '下一步' });
+  const attachment = await store.attach(parent.id, '截图.png', new Uint8Array([137, 80]));
+  await store.updateIssue(parent.id, { body: '正文 ' + attachment.markdown, status: 'closed', closeReason: 'on-hold' });
+  const child = await store.createIssue(source.id, { title: '关联', parent: parent.id, dependencies: [parent.id] });
+  const comment = await store.addComment(parent.id, '保留评论');
+  const deleted = await store.addComment(parent.id, '已删评论'); await store.deleteComment(deleted.id);
+  adapter.files.set(parent.path, adapter.files.get(parent.path)!.replace('labels:', '# 用户注释\ncustom: keep\nlabels:'));
+  await assert.rejects(store.moveIssue(parent.id, target.id, parent.revision), /冲突/);
+  const current = await store.getIssue(parent.id);
+  const moved = await store.moveIssue(parent.id, target.id, current.revision);
+  assert.equal(moved.id, parent.id); assert.equal(moved.projectId, target.id); assert.equal(moved.number, 2);
+  assert.equal(moved.body, current.body); assert.deepEqual(moved.labels, ['P1']); assert.equal(moved.milestone, '下一步'); assert.equal(moved.closeReason, 'on-hold');
+  assert.equal(adapter.files.has(parent.path), false); assert.match(adapter.files.get(moved.path)!, /custom: keep/); assert.match(adapter.files.get(moved.path)!, /# 用户注释/);
+  const fresh = new Store(adapter), snap = await fresh.snapshot();
+  assert.equal((await fresh.getIssue(parent.path)).id, parent.id);
+  assert.equal((await fresh.getIssue('来源#1')).id, parent.id);
+  assert.equal((await fresh.getIssue('1', source.id)).id, parent.id);
+  assert.equal((await fresh.resolve(`[[${parent.path}|旧链接]]`)).kind, 'issue');
+  assert.equal((await fresh.getIssue(child.id)).parent, parent.id); assert.deepEqual((await fresh.getIssue(child.id)).dependencies, [parent.id]);
+  assert.equal(snap.timeline.find(t => t.id === comment.id)?.issueId, parent.id);
+  assert.ok(snap.timeline.filter(t => t.issueId === parent.id).every(t => t.path.startsWith(target.path.slice(0, -'project.md'.length))));
+  assert.equal(adapter.files.has(deleted.path), false, '已删除的评论记录也随目录移动');
+  assert.ok(adapter.binary.has(attachment.path));
+  assert.equal((await fresh.createIssue(source.id, { title: '原项目的新议题' })).number, 3);
+  await fresh.deleteProject(source.id, true);
+  assert.equal((await fresh.getIssue(parent.id)).body, current.body);
+  assert.equal((await fresh.snapshot()).timeline.find(t => t.id === comment.id)?.body, '保留评论');
+});
+
+test('a failed file move rolls back the metadata and comment folder', async () => {
+  const { adapter, store } = setup();
+  const source = await store.createProject({ title: 'A' }), target = await store.createProject({ title: 'B' });
+  const issue = await store.createIssue(source.id, { title: '保留' }); const comment = await store.addComment(issue.id, '评论');
+  const before = adapter.files.get(issue.path);
+  const rename = adapter.rename.bind(adapter);
+  adapter.rename = async (from, to) => { if (from === issue.path) throw new Error('移动失败'); return rename(from, to); };
+  await assert.rejects(store.moveIssue(issue.id, target.id), /移动失败/);
+  assert.equal(adapter.files.get(issue.path), before); assert.ok(adapter.files.has(comment.path));
+  assert.equal((await new Store(adapter).getIssue(issue.id)).projectId, source.id);
+});
 
 test('comment deletion checks revisions and preserves a recoverable Markdown record', async () => {
   const { adapter, store } = setup();

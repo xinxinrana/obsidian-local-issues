@@ -8,7 +8,7 @@ export interface Project {
 export interface Issue {
   id: string; projectId: string; number: number; title: string; body: string; status: IssueStatus; closeReason?: CloseReason;
   labels: string[]; milestone: string; assignees: string[]; parent: string; dependencies: string[];
-  dueDate: string; author: string; createdAt: string; updatedAt: string; path: string; revision?: string;
+  dueDate: string; author: string; createdAt: string; updatedAt: string; path: string; revision?: string; previousPaths?: string[];
 }
 export interface TimelineEntry {
   id: string; issueId: string; kind: 'comment' | 'event'; body: string; author: string;
@@ -23,6 +23,8 @@ export interface VaultAdapter {
   exists(path: string): Promise<boolean>;
   /** Moves a project folder to the vault/system trash so a mistaken delete stays recoverable. */
   removeFolder(path: string): Promise<void>;
+  /** Moves a file or folder without overwriting an existing destination. */
+  rename(path: string, destination: string): Promise<void>;
 }
 export type ProjectInput = Pick<Project, 'title'> & Partial<Pick<Project, 'description' | 'status' | 'dueDate'>>;
 export type ProjectPatch = Partial<ProjectInput>;
@@ -38,6 +40,8 @@ export interface IssueStore {
   deleteProject(ref: string, force?: boolean): Promise<{ project: Project; issues: number; folder: string }>;
   createIssue(project: string, input: IssueInput): Promise<Issue>;
   updateIssue(ref: string, patch: IssuePatch, expectedUpdatedAt?: string): Promise<Issue>;
+  deleteIssue(ref: string, expectedUpdatedAt?: string): Promise<void>;
+  moveIssue(ref: string, project: string, expectedUpdatedAt?: string): Promise<Issue>;
   addComment(ref: string, body: string, author?: string): Promise<TimelineEntry>;
   editComment(id: string, body: string, expectedUpdatedAt?: string): Promise<TimelineEntry>;
   deleteComment(id: string, expectedUpdatedAt?: string): Promise<void>;
