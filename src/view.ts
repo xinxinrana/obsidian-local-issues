@@ -1,5 +1,5 @@
-import { Platform, Component, ItemView, MarkdownRenderer, Modal, Notice, Menu, setIcon, WorkspaceLeaf, type ViewStateResult } from 'obsidian';
-import { createLiveMarkdown, MARKDOWN_TOOLS } from './live-markdown';
+import { Platform, Component, ItemView, MarkdownRenderer, Modal, Notice, Menu, Scope, setIcon, WorkspaceLeaf, type Modifier, type ViewStateResult } from 'obsidian';
+import { createLiveMarkdown, MARKDOWN_TOOLS, MARKDOWN_SHORTCUTS } from './live-markdown';
 import { suppressTooltips } from './tooltips';
 import { MobileModal, observeMobileViewport } from './mobile';
 import { mobilePage, type MobilePage } from './mobile-layout';
@@ -11,13 +11,24 @@ export interface ViewHost { draftCache?: Drafts; store: IssueStore; author: stri
 const PROJECT_STATES: ProjectStatus[] = ['active', 'paused', 'completed', 'archived'];
 const el = <K extends keyof HTMLElementTagNameMap>(parent: HTMLElement, tag: K, cls = '', text = ''): HTMLElementTagNameMap[K] => { const node = document.createElement(tag); node.className = cls; if (text) node.textContent = text; parent.append(node); return node; };
 function prependIcon(parent: HTMLElement, name: string) { const icon = el(parent, 'span', 'li-icon'); setIcon(icon, name); icon.setAttribute('aria-hidden', 'true'); parent.prepend(icon); parent.addClass('li-with-icon'); }
-const action = (parent: HTMLElement, text: string, run: () => void, cls = '', icon = '') => { const b = el(parent, 'button', cls, text); b.type = 'button'; if (icon) prependIcon(b, icon); b.addEventListener('click', run); return b; };
+const action = (parent: HTMLElement, text: string, run: () => void, cls = '', icon = '') => { const b = el(parent, 'button', cls, text); b.type = 'button'; icon ||= ({ 编辑: 'pencil', 编辑标题: 'pencil', 笔记: 'file-text', 删除: 'trash-2', 草稿: 'file-pen-line' } as Record<string, string>)[text] || ''; if (icon) prependIcon(b, icon); b.addEventListener('click', run); return b; };
 const safe = (fn: () => Promise<unknown>) => { void fn().catch(error => new Notice(error instanceof Error ? error.message : String(error))); };
 let controlId = 0;
 function labelControl(control: HTMLElement, fallback = '') { const field = control.closest('.li-field'); const label = field?.querySelector(':scope > label'); const id = `li-control-${++controlId}`; control.id = id; if (label instanceof HTMLLabelElement) label.htmlFor = id; control.setAttribute('aria-label', label?.textContent || fallback); }
 const words = (s: string) => s.split(/[,，\n]/).map(x => x.trim()).filter(Boolean);
 const date = (s: string) => s ? new Date(s).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
-function select(parent: HTMLElement, options: [string, string][], value: string, changed: (value: string) => void): HTMLSelectElement { const input = el(parent, 'select'); for (const [key, name] of options) { const opt = el(input, 'option', '', name); opt.value = key; } input.value = value; labelControl(input, options[0]?.[1] || '选项'); input.addEventListener('change', () => changed(input.value)); return input; }
+const STATE_ICONS: Record<string, string> = { open: 'circle-dot', active: 'circle-dot', closed: 'circle-check', completed: 'circle-check', 'on-hold': 'circle-pause', paused: 'circle-pause', 'not-planned': 'circle-slash', archived: 'archive' };
+function select(parent: HTMLElement, options: [string, string][], value: string, changed: (value: string) => void): HTMLSelectElement {
+  const state = options.some(([key]) => key === 'completed') && options.every(([key]) => key in STATE_ICONS || !key);
+  const icon = state ? STATE_ICONS[value] : /不分组/.test(options[0]?.[1] || '') ? 'group' : /最近更新/.test(options[0]?.[1] || '') ? 'arrow-down-wide-narrow' : '';
+  const control = icon ? el(parent, 'span', 'li-select-control') : parent;
+  if (icon) prependIcon(control, icon);
+  const input = el(control, 'select');
+  for (const [key, name] of options) { const opt = el(input, 'option', '', name); opt.value = key; }
+  input.value = value; labelControl(input, options[0]?.[1] || '选项');
+  input.addEventListener('change', () => { if (state) { const node = control.querySelector<HTMLElement>('.li-icon'); if (node) setIcon(node, STATE_ICONS[input.value] || 'circle-dot'); } changed(input.value); });
+  return input;
+}
 function input(parent: HTMLElement, placeholder: string, value = '') { const field = el(parent, 'input'); field.type = 'text'; field.enterKeyHint = 'done'; field.placeholder = placeholder; field.value = value; labelControl(field, placeholder); return field; }
 function pill(parent: HTMLElement, status: string, reason?: CloseReason) {
   const closedReason = reason || 'completed'; const label = status === 'closed' ? (reason ? `已关闭 · ${CLOSE_REASON_NAMES[closedReason]}` : '已关闭') : STATUS_NAMES[status as keyof typeof STATUS_NAMES] || status;
@@ -57,6 +68,7 @@ export class IssuesView extends ItemView {
   private drafts = new Map<string, string>();
   private draftCache: Drafts;
   private editors = new WeakMap<HTMLElement, DraftEditor>();
+  private shortcutEditors = new WeakMap<HTMLElement, ReturnType<typeof createLiveMarkdown>>();
   private renderScope = new Component();
   private generation = 0;
   private pending = false;
@@ -68,7 +80,16 @@ export class IssuesView extends ItemView {
   private phone?: MobilePage;
   private leaveMobileEdit?: () => void;
   private disposeViewport?: () => void;
-  constructor(leaf: WorkspaceLeaf, private host: ViewHost) { super(leaf); this.navigation = true; this.draftCache = host.draftCache || new Drafts({ read: () => undefined, write: () => {} }, message => { new Notice(message, 0); }); }
+  constructor(leaf: WorkspaceLeaf, private host: ViewHost) { super(leaf); this.navigation = true; this.scope = new Scope(this.app.scope); this.bindMarkdownShortcuts(this.scope); this.draftCache = host.draftCache || new Drafts({ read: () => undefined, write: () => {} }, message => { new Notice(message, 0); }); }
+  private bindMarkdownShortcuts(scope: Scope) {
+    for (const [modifiers, key, command] of MARKDOWN_SHORTCUTS) scope.register(modifiers as Modifier[], key.toUpperCase(), event => {
+      if (event.isComposing) return;
+      const target = event.target as HTMLElement | null;
+      const container = target?.closest?.('.li-live-editor');
+      const editor = container instanceof HTMLElement ? this.shortcutEditors.get(container) : undefined;
+      if (editor?.shortcut(command)) { event.preventDefault(); event.stopPropagation(); return false; }
+    });
+  }
   getViewType() { return VIEW_TYPE; }
   getDisplayText() { return 'Local Issues'; }
   getIcon() { return 'list-todo'; }
@@ -526,7 +547,7 @@ export class IssuesView extends ItemView {
   private moreButton(parent: HTMLElement, options: [string, () => void][], label: string) {
     if (Platform.isMobile) options = options.filter(([title]) => !title.includes('分享') && !title.startsWith('复制'));
     const button = action(parent, '更多', () => undefined, 'li-subtle li-more', 'ellipsis'); button.setAttribute('aria-label', label);
-    button.addEventListener('click', event => { const menu = new Menu(); for (const [title, run] of options) menu.addItem(item => item.setTitle(title).onClick(run)); menu.showAtMouseEvent(event); });
+    button.addEventListener('click', event => { const menu = new Menu(); for (const [title, run] of options) menu.addItem(item => { const icon = ({ '打开笔记': 'file-text', '编辑项目': 'pencil', '复制双链': 'link', '分享给 Agent': 'share-2', '复制 Issues 列表链接': 'link', '移动议题': 'folder-input', '删除议题': 'trash-2' } as Record<string, string>)[title]; item.setTitle(title).onClick(run); if (icon) item.setIcon(icon); }); menu.showAtMouseEvent(event); });
   }
   private fieldsButton(parent: HTMLElement, fields: Set<string>, options: [string, string][]) { const button = action(parent, '字段', () => undefined, '', 'columns-3'); button.addEventListener('click', event => { const menu = new Menu(); for (const [key, name] of options) menu.addItem(item => item.setTitle(name).setChecked(fields.has(key)).onClick(() => { fields.has(key) ? fields.delete(key) : fields.add(key); safe(() => this.draw()); })); menu.showAtMouseEvent(event); }); }
   private hideColumns(table: HTMLTableElement, keys: string[], fields: Set<string>) { for (const row of table.rows) { if (row.cells.length === 1 && row.cells[0].colSpan > 1) continue; for (let i = 0; i < row.cells.length; i++) row.cells[i].hidden = !!keys[i] && !fields.has(keys[i]); } }
@@ -553,6 +574,8 @@ export class IssuesView extends ItemView {
       ['打开笔记', () => safe(() => this.host.openNote(issue.path))],
       ['复制双链', () => safe(async () => { await navigator.clipboard.writeText(issueLink(issue)); new Notice('已复制双链'); })],
       ['分享给 Agent', () => safe(async () => { await navigator.clipboard.writeText(await this.host.resourceLink(issue.id)); new Notice('已复制议题链接'); })],
+      ['移动议题', () => safe(() => this.afterEditing(() => this.moveIssue(issue)))],
+      ['删除议题', () => safe(() => this.afterEditing(() => this.deleteIssue(issue)))],
     ], 'Issue 更多操作');
     const summary = el(root, 'div', 'li-issue-summary'); pill(summary, issue.status, issue.closeReason); el(summary, 'span', 'li-muted', `${issue.author} 创建于 ${date(issue.createdAt)} · ${this.data.timeline.filter(e => e.issueId === issue.id && e.kind === 'comment').length} 条评论`);
     const detail = el(root, 'div', 'li-detail'); const main = el(detail, 'div', 'li-detail-main');
@@ -582,8 +605,8 @@ export class IssuesView extends ItemView {
     const compose = () => {
       const composer = el(main, 'section', 'li-composer'); el(composer, 'h3', '', '发表评论'); const editor = this.editor(composer, this.drafts.get(issue.id) || '', issue.id, issue.path, value => this.drafts.set(issue.id, value)); const status = el(editor.element, 'div', 'li-composer-status'); status.setAttribute('role', 'status'); const footer = editor.actions;
       if (!this.phone) {
-        let closeReason: CloseReason = 'completed'; if (issue.status !== 'closed') select(footer, Object.entries(CLOSE_REASON_NAMES) as [string, string][], closeReason, value => { closeReason = value as CloseReason; });
-        const close = action(footer, issue.status === 'closed' ? '重新打开 Issue' : '关闭 Issue', () => safe(() => this.afterEditing(async () => { close.disabled = true; try { await this.host.store.updateIssue(issue.id, { status: issue.status === 'closed' ? 'open' : 'closed', ...(issue.status !== 'closed' ? { closeReason } : {}), actor: this.host.author }, issue.revision ?? issue.updatedAt); await this.draw(); } finally { close.disabled = false; } })));
+        let closeReason: CloseReason = 'completed'; if (issue.status !== 'closed') select(footer, Object.entries(CLOSE_REASON_NAMES) as [string, string][], closeReason, value => { closeReason = value as CloseReason; }).setAttribute('aria-label', '关闭原因');
+        const close = action(footer, issue.status === 'closed' ? '重新打开 Issue' : '关闭 Issue', () => safe(() => this.afterEditing(async () => { close.disabled = true; try { await this.host.store.updateIssue(issue.id, { status: issue.status === 'closed' ? 'open' : 'closed', ...(issue.status !== 'closed' ? { closeReason } : {}), actor: this.host.author }, issue.revision ?? issue.updatedAt); await this.draw(); } finally { close.disabled = false; } })), '', issue.status === 'closed' ? 'circle-dot' : 'circle-check');
       }
       const draft = this.cacheForm(editor.element, `new-comment:${issue.id}`);
       const send = async () => {
@@ -709,6 +732,35 @@ export class IssuesView extends ItemView {
     return field;
   }
 
+  private moveIssue(issue: Issue) {
+    const choices = this.data.projects.filter(project => project.id !== issue.projectId && project.status !== 'archived');
+    const modal = this.modal('移动议题');
+    if (!choices.length) { el(modal.contentEl, 'p', '', '请先创建另一个项目。'); action(modal.contentEl, '关闭', () => modal.close()); modal.open(); return; }
+    el(modal.contentEl, 'p', 'li-muted', '正文、评论、附件和关联会保留，议题将在目标项目中获得新编号。');
+    let target = choices[0].id;
+    select(this.field(modal.contentEl, '目标项目'), choices.map(project => [project.id, project.title]), target, value => { target = value; });
+    this.saveButton(modal, async () => {
+      const moved = await this.host.store.moveIssue(issue.id, target, issue.revision ?? issue.updatedAt);
+      modal.close(); await this.navigate(moved.projectId, moved.id); new Notice(`议题已移动为 #${moved.number}`);
+    });
+    modal.open();
+  }
+  private deleteIssue(issue: Issue) {
+    const modal = this.modal(`删除议题 #${issue.number}？`); modal.modalEl.addClass('li-delete-dialog');
+    el(modal.contentEl, 'p', '', issue.title);
+    el(modal.contentEl, 'p', 'li-muted', '议题及其评论将从项目中移除，子议题和附件会保留。');
+    const status = el(modal.contentEl, 'p', 'li-delete-status'); status.setAttribute('role', 'status');
+    const buttons = el(modal.modalEl, 'div', 'li-modal-actions');
+    const cancel = action(buttons, '取消', () => modal.close());
+    const confirm = action(buttons, '确认删除', () => safe(async () => {
+      if (confirm.disabled) return;
+      confirm.disabled = true; cancel.disabled = true; status.textContent = '正在删除…'; status.removeClass('is-error');
+      try { await this.host.store.deleteIssue(issue.id, issue.revision ?? issue.updatedAt); }
+      catch (error) { status.addClass('is-error'); status.textContent = `删除失败：${error instanceof Error ? error.message : String(error)}`; confirm.disabled = false; cancel.disabled = false; return; }
+      modal.close(); await this.navigate(issue.projectId); new Notice('议题已删除');
+    }), 'mod-warning');
+    modal.open(); cancel.focus();
+  }
   private deleteComment(parent: HTMLElement, entry: TimelineEntry) {
     safe(() => this.afterEditing(() => {
       if (this.deletePrompt?.modalEl.isConnected) {
@@ -742,7 +794,12 @@ export class IssuesView extends ItemView {
       modal.open(); cancel.focus();
     }, true));
   }
-  private field(parent: HTMLElement, label: string) { const field = el(parent, 'div', 'li-field'); el(field, 'label', '', label); return field; }
+  private field(parent: HTMLElement, label: string) {
+    const field = el(parent, 'div', 'li-field'); const heading = el(field, 'label', '', label);
+    const icon = ({ 状态: 'circle-dot', 标签: 'tags', 里程碑: 'milestone', 负责人: 'users', 截止日期: 'calendar', 父议题: 'git-branch', 依赖: 'link' } as Record<string, string>)[label];
+    if (icon) prependIcon(heading, icon);
+    return field;
+  }
   private projectModal(project?: Project) {
     const modal = this.phone ? undefined : this.modal(project ? '编辑项目' : '新建项目');
     const form = modal?.contentEl || el(this.phone!.content, 'section', 'li-mobile-project-form');
@@ -827,10 +884,12 @@ export class IssuesView extends ItemView {
     const list = el(control.parentElement!, 'datalist'); list.id = `li-options-${++controlId}`; control.setAttribute('list', list.id);
     for (const value of [...new Set(values)].filter(Boolean).sort()) el(list, 'option').value = value;
   }
-  private modal(title: string) { const modal = new MobileModal(this.app); suppressTooltips(modal.modalEl); modal.modalEl.addClass('li-modal-container'); modal.contentEl.addClass('local-issues', 'li-modal'); modal.titleEl.setText(title); return modal; }
+  private modal(title: string) { const modal = new MobileModal(this.app); this.bindMarkdownShortcuts(modal.scope); suppressTooltips(modal.modalEl); modal.modalEl.addClass('li-modal-container'); modal.contentEl.addClass('local-issues', 'li-modal'); modal.titleEl.setText(title); return modal; }
   private saveButton(modal: Modal, run: () => Promise<void>) { const buttons = el(modal.modalEl, 'div', 'li-modal-actions'); action(buttons, '取消', () => modal.close()); const feedback = el(modal.contentEl, 'p', 'li-form-error'); feedback.setAttribute('role', 'alert'); const save = action(buttons, '保存', () => safe(async () => { if (save.disabled) return; save.disabled = true; feedback.textContent = ''; try { if (modal.contentEl.querySelector('[data-uploading]')) throw new Error('附件正在保存，请稍后保存'); await run(); } catch (error) { feedback.textContent = error instanceof Error ? error.message : String(error); } finally { save.disabled = false; } }), 'mod-cta'); }
   private editor(parent: HTMLElement, initial: string, ref: string, sourcePath: string, changed?: (body: string) => void) {
     const container = el(parent, 'div', 'li-editor'); const tools = el(container, 'div', 'li-editor-toolbar');
+    const tabs = el(tools, 'div', 'li-editor-tabs');
+    const formatting = el(tools, 'div', 'li-editor-formatting'); formatting.setAttribute('role', 'toolbar'); formatting.setAttribute('aria-label', 'Markdown 格式');
     const liveContainer = el(container, 'div', 'li-live-editor');
     const preview = el(container, 'div', 'li-editor-preview markdown-rendered'); preview.hidden = true;
     const footer = el(container, 'div', 'li-editor-footer');
@@ -839,16 +898,17 @@ export class IssuesView extends ItemView {
       onSubmit: () => { if (!uploads) (actions.querySelector<HTMLButtonElement>('.mod-cta') || container.closest('.li-create')?.querySelector<HTMLButtonElement>('.li-inline-actions .mod-cta') || container.closest('.modal')?.querySelector<HTMLButtonElement>('.li-modal-actions .mod-cta'))?.click(); },
       onAttach: () => { if (ref) picker.click(); else new Notice('请先创建项目，再添加附件'); },
     });
+    this.shortcutEditors.set(liveContainer, view);
     const destroy = () => { if (!disposed) { disposed = true; view.destroy(); } };
     this.renderScope.register(destroy);
     const getValue = () => view.state.doc.toString();
     const focus = () => view.focus();
     const insert = (text: string) => { const { from, to } = view.state.selection.main; view.dispatch({ changes: { from, to, insert: text }, selection: { anchor: from + text.length } }); focus(); };
-    const write = action(tools, '编写', () => { liveContainer.hidden = false; preview.hidden = true; write.addClass('is-active'); previewButton.removeClass('is-active'); focus(); });
-    const previewButton = action(tools, '预览', () => { liveContainer.hidden = true; preview.hidden = false; preview.replaceChildren(); safe(() => MarkdownRenderer.render(this.app, getValue() || '*暂无内容*', preview, sourcePath, this.renderScope)); write.removeClass('is-active'); previewButton.addClass('is-active'); });
+    const write = action(tabs, '编写', () => { liveContainer.hidden = false; preview.hidden = true; write.addClass('is-active'); previewButton.removeClass('is-active'); focus(); });
+    const previewButton = action(tabs, '预览', () => { liveContainer.hidden = true; preview.hidden = false; preview.replaceChildren(); safe(() => MarkdownRenderer.render(this.app, getValue() || '*暂无内容*', preview, sourcePath, this.renderScope)); write.removeClass('is-active'); previewButton.addClass('is-active'); });
     write.addClass('is-active');
     for (const [command, label, shortcut] of Platform.isMobile ? [] : MARKDOWN_TOOLS) {
-      const button = action(tools, label, () => { liveContainer.hidden = false; preview.hidden = true; write.addClass('is-active'); previewButton.removeClass('is-active'); view.command(command); });
+      const button = action(formatting, label, () => { liveContainer.hidden = false; preview.hidden = true; write.addClass('is-active'); previewButton.removeClass('is-active'); view.command(command); });
       button.setAttribute('aria-label', shortcut && !Platform.isMobile ? `${label}（${shortcut}）` : label);
       if (shortcut) el(button, 'kbd', '', shortcut.replace('Cmd/Ctrl+', Platform.isMacOS ? '⌘' : 'Ctrl+'));
       button.addEventListener('mousedown', event => event.preventDefault());
@@ -859,11 +919,12 @@ export class IssuesView extends ItemView {
     const actions = el(footer, 'div', 'li-editor-actions');
     const attach = async (list: File[]) => { uploads++; container.dataset.uploading = 'true'; uploadStatus.textContent = '正在保存附件…'; try { for (const file of list) { const saved = await this.host.store.attach(ref, file.name, new Uint8Array(await file.arrayBuffer())); if (!disposed) insert(`\n${saved.markdown}\n`); } } finally { if (--uploads === 0) { delete container.dataset.uploading; uploadStatus.textContent = ''; } } };
     picker.addEventListener('change', () => { const list = [...(picker.files || [])]; picker.value = ''; if (list.length) safe(() => attach(list)); });
-    const attachButton = action(tools, Platform.isMobile ? '附件' : '附件 Cmd/Ctrl+Shift+U', () => { if (ref) picker.click(); else new Notice('请先创建项目，再添加附件'); }); attachButton.disabled = !ref;
-    if (Platform.isMobile) tools.insertBefore(attachButton, tools.children[2] || null);
+    const attachButton = action(Platform.isMobile ? tabs : formatting, '附件', () => { if (ref) picker.click(); else new Notice('请先创建项目，再添加附件'); }); attachButton.disabled = !ref;
+    attachButton.setAttribute('aria-label', Platform.isMobile ? '附件' : '附件（⌘/Ctrl+Shift+U）');
+    formatting.hidden = Platform.isMobile;
     view.contentDOM.addEventListener('paste', event => { const list = [...(event.clipboardData?.files || [])]; if (!list.length) return; event.preventDefault(); safe(() => attach(list)); }, true);
     container.addEventListener('dragover', event => { if (event.dataTransfer?.types.includes('Files')) { event.preventDefault(); container.addClass('is-dragover'); } }); container.addEventListener('dragleave', () => container.removeClass('is-dragover')); container.addEventListener('drop', event => { container.removeClass('is-dragover'); const list = [...(event.dataTransfer?.files || [])]; if (!list.length) return; event.preventDefault(); safe(() => attach(list)); });
-    const editor = { element: container, get value() { return getValue(); }, setValue: (value: string) => { if (!disposed) view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value } }); }, get uploading() { return uploads > 0; }, actions, focus, destroy, clear: () => { if (!disposed) view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: '' } }); } };
+    const editor = { element: container, get value() { return getValue(); }, setValue: (value: string) => { if (!disposed) view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value }, selection: { anchor: value.length } }); }, get uploading() { return uploads > 0; }, actions, focus, destroy, clear: () => { if (!disposed) view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: '' }, selection: { anchor: 0 } }); } };
     this.editors.set(container, editor); return editor;
   }
 }

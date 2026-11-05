@@ -368,3 +368,11 @@ body:has(.li-no-tooltips:hover) .tooltip,
 .local-issues .li-draft-item :is(strong,p) { overflow-wrap: anywhere; }
 .local-issues .li-draft-item button { justify-self: start; }
 .local-issues .li-draft-raw { white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+
+.local-issues .li-editor-tabs, .local-issues .li-editor-formatting { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; width: 100%; min-width: 0; }
+.local-issues .li-editor-formatting { border-top: 1px solid var(--li-border); padding-block: 6px; }
+.local-issues .li-select-control { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.local-issues .li-select-control > select { min-width: 0; flex: 1; }
+.local-issues .li-field > .li-select-control { width: 100%; }
+.local-issues .li-field > label.li-with-icon { display: flex; align-items: center; gap: 6px; }
+.is-mobile .local-issues .li-editor-tabs { flex-wrap: nowrap; width: auto; }

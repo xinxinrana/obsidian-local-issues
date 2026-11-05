@@ -167,5 +167,14 @@ test('CLI gh-style lifecycle, JSON selection, stdin, files, attachments and shar
     const removable = await json(['issue', 'comment', created.id, '-b', '可删除评论']);
     assert.equal((await json(['comment', 'delete', removable.id])).deleted, true);
     assert.ok(!(await f.store.snapshot()).timeline.some(entry => entry.id === removable.id));
+    const movable = await json(['issue', 'create', '-P', project.id, '-t', '移动测试']);
+    await json(['issue', 'comment', movable.id, '-b', '移动时保留']);
+    const moved = await json(['issue', 'move', movable.id, '--to', other.id]);
+    assert.equal(moved.projectId, other.id);
+    assert.equal((await f.store.snapshot()).timeline.find(entry => entry.issueId === movable.id)?.body, '移动时保留');
+    const staleDelete = await run(['issue', 'delete', movable.id, '--if-match', movable.revision]);
+    assert.equal(staleDelete.code, 1); assert.match(staleDelete.stderr, /CONFLICT/);
+    assert.equal((await json(['issue', 'delete', movable.id, '--if-match', moved.revision])).deleted, true);
+
   } finally { await f.close(); await rm(temp, { recursive: true, force: true }); }
 });

@@ -64,20 +64,24 @@ export class Store implements IssueStore {
   private mutate<T>(fn: () => Promise<T>): Promise<T> { const result = this.pending.then(fn); this.pending = result.catch(() => undefined); return result; }
   async snapshot(): Promise<Snapshot> {
     const result: Snapshot = { projects: [], issues: [], timeline: [], warnings: [] };
+    const deleted = new Set<string>();
     const entries = await this.adapter.list();
     for (const path of entries.filter(p => p.startsWith(`${this.root}/`) && p.endsWith('.md')).sort()) {
       try {
         safePath(path);
         const raw = await this.adapter.read(path); const parsed = parse(raw); const d = parsed.data;
         if (!TYPES.includes(text(d.type))) continue;
-        if (d.type === 'local-issues/comment' && d.deletedAt) continue;
+        if ((d.type === 'local-issues/comment' || d.type === 'local-issues/issue') && d.deletedAt) {
+          if (d.type === 'local-issues/issue') for (const ref of [text(d.id), path, ...strings(d.previousPaths)]) deleted.add(normalizedRef(ref));
+          continue;
+        }
         if (!text(d.id) || !text(d.createdAt) || !text(d.updatedAt)) throw new Error('缺少 ID 或时间属性');
         const base = { id: text(d.id), createdAt: text(d.createdAt), updatedAt: text(d.updatedAt), path, revision: revision(raw) };
         if (d.type === 'local-issues/project') {
           result.projects.push({ ...base, title: title(d.title), description: parsed.body, status: status(d.status, PROJECT_STATUSES), dueDate: text(d.dueDate) });
         } else if (d.type === 'local-issues/issue') {
           if (!text(d.projectId) || !Number.isInteger(d.number) || Number(d.number) < 1) throw new Error('缺少项目 ID 或有效编号');
-          result.issues.push({ ...base, projectId: text(d.projectId), number: Number(d.number), title: title(d.title), body: parsed.body, status: d.status === 'in-progress' ? 'open' : status(d.status, ISSUE_STATUSES), ...(d.status === 'closed' ? { closeReason: d.closeReason ? status<CloseReason>(d.closeReason, CLOSE_REASONS) : 'completed' as const } : {}), labels: strings(d.labels), milestone: text(d.milestone), assignees: strings(d.assignees), parent: text(d.parent), dependencies: strings(d.dependencies), dueDate: text(d.dueDate), author: text(d.author, this.author) });
+          result.issues.push({ ...base, projectId: text(d.projectId), number: Number(d.number), title: title(d.title), body: parsed.body, status: d.status === 'in-progress' ? 'open' : status(d.status, ISSUE_STATUSES), ...(d.status === 'closed' ? { closeReason: d.closeReason ? status<CloseReason>(d.closeReason, CLOSE_REASONS) : 'completed' as const } : {}), labels: strings(d.labels), milestone: text(d.milestone), assignees: strings(d.assignees), parent: text(d.parent), dependencies: strings(d.dependencies), dueDate: text(d.dueDate), author: text(d.author, this.author), previousPaths: strings(d.previousPaths) });
         } else {
           if (!text(d.issueId)) throw new Error('缺少 Issue ID');
           const kind = d.type === 'local-issues/comment' ? 'comment' : 'event';
@@ -90,9 +94,12 @@ export class Store implements IssueStore {
       for (const entry of collection) { if (seen.has(entry.id)) result.warnings.push(`重复 ID：${entry.id}（${entry.path}）`); seen.add(entry.id); }
     }
     const issueIds = new Set(result.issues.map(x => x.id));
+    result.timeline = result.timeline.filter(entry => issueIds.has(entry.issueId));
     for (const issue of result.issues) {
       if (issue.parent && !issueIds.has(issue.parent)) issue.parent = this.findRelated(result, issue.parent) ?? issue.parent;
       issue.dependencies = issue.dependencies.map(ref => issueIds.has(ref) ? ref : this.findRelated(result, ref) ?? ref);
+      if (issue.parent && deleted.has(normalizedRef(issue.parent))) issue.parent = '';
+      issue.dependencies = issue.dependencies.filter(ref => !deleted.has(normalizedRef(ref)));
       if (!result.projects.some(p => p.id === issue.projectId)) result.warnings.push(`${issue.path}：项目不存在`);
     }
     result.timeline.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
@@ -110,11 +117,16 @@ export class Store implements IssueStore {
   private pickIssue(snap: Snapshot, ref: string, project?: string): Issue {
     const r = normalizedRef(ref);
     let items = snap.issues;
-    if (project) items = items.filter(i => i.projectId === this.pickProject(snap, project).id);
+    const inProject = (issue: Issue, p: Project, n: number) => issue.projectId === p.id && issue.number === n || issue.previousPaths?.some(path => path.startsWith(p.path.slice(0, p.path.lastIndexOf('/')) + '/issues/') && Number(path.split('/').at(-1)?.match(/^(\d+)-/)?.[1]) === n);
+    if (project) {
+      const p = this.pickProject(snap, project), n = /^#?\d+$/.test(r) ? Number(r.replace('#', '')) : undefined;
+      items = items.filter(i => i.projectId === p.id || n !== undefined && inProject(i, p, n));
+      if (n !== undefined) return unique(items.filter(i => inProject(i, p, n)), 'Issue');
+    }
     const numbered = r.match(/^(.*?)#(\d+)$/);
-    if (numbered && numbered[1]) { const p = this.pickProject(snap, numbered[1]); return unique(items.filter(i => i.projectId === p.id && i.number === Number(numbered[2])), 'Issue'); }
+    if (numbered && numbered[1]) { const p = this.pickProject(snap, numbered[1]); return unique(items.filter(i => inProject(i, p, Number(numbered[2]))), 'Issue'); }
     const n = /^#?\d+$/.test(r) ? Number(r.replace('#', '')) : undefined;
-    return unique(items.filter(i => i.id === r || matchesPath(i.path, r) || (n !== undefined && i.number === n)), 'Issue');
+    return unique(items.filter(i => i.id === r || matchesPath(i.path, r) || i.previousPaths?.some(path => matchesPath(path, r)) || (n !== undefined && i.number === n)), 'Issue');
   }
   async getProject(ref: string): Promise<Project> { return this.pickProject(await this.snapshot(), ref); }
   async getIssue(ref: string, project?: string): Promise<Issue> { return this.pickIssue(await this.snapshot(), ref, project); }
@@ -187,7 +199,7 @@ export class Store implements IssueStore {
   async createIssue(project: string, input: IssueInput): Promise<Issue> {
     return this.mutate(async () => {
       const snap = await this.snapshot(); const p = this.pickProject(snap, project); const id = `i-${randomUUID()}`; const time = this.now();
-      const number = Math.max(0, ...snap.issues.filter(i => i.projectId === p.id).map(i => i.number)) + 1;
+      const number = await this.nextIssueNumber(p, snap);
       const base: Issue = { id, projectId: p.id, number, title: title(input.title), body: '', status: 'open', labels: [], milestone: '', assignees: [], parent: '', dependencies: [], dueDate: '', author: this.author, createdAt: time, updatedAt: time, path: `${p.path.slice(0, p.path.lastIndexOf('/'))}/issues/${String(number).padStart(4, '0')}-${slug(title(input.title))}-${id.slice(2, 10)}.md` };
       const value = await this.issueFields(base, input, snap);
       const raw = markdown(this.issueMeta(value, snap), value.body);
@@ -204,6 +216,55 @@ export class Store implements IssueStore {
       await this.adapter.write(value.path, raw, previousRaw);
       if (value.status !== old.status || value.closeReason !== old.closeReason) await this.writeTimeline(value, 'event', value.status === 'closed' ? `关闭了此 Issue（${({ completed: '完成', 'on-hold': '搁置', 'not-planned': '不做' } as const)[value.closeReason || 'completed']}）` : '重新打开了此 Issue', actor, { from: old.status, to: value.status });
       return { ...value, revision: revision(raw) };
+    });
+  }
+  private async nextIssueNumber(project: Project, snap: Snapshot): Promise<number> {
+    // Deleted Markdown records reserve their numbers as well.
+    const folder = project.path.slice(0, project.path.lastIndexOf('/')) + '/issues/';
+    const numbers: number[] = [];
+    for (const path of (await this.adapter.list()).filter(path => path.startsWith(this.root + '/') && path.endsWith('.md'))) {
+      if (path.startsWith(folder)) numbers.push(Number(path.slice(folder.length).match(/^(\d+)-/)?.[1]) || 0);
+      try {
+        const { data } = parse(await this.adapter.read(path));
+        if (data.type !== 'local-issues/issue') continue;
+        if (data.projectId === project.id && Number.isInteger(data.number)) numbers.push(Number(data.number));
+        for (const previous of strings(data.previousPaths)) if (previous.startsWith(folder)) numbers.push(Number(previous.slice(folder.length).match(/^(\d+)-/)?.[1]) || 0);
+      } catch { /* snapshot() already reports malformed notes. */ }
+    }
+    return Math.max(0, ...numbers, ...snap.issues.filter(issue => issue.projectId === project.id).map(issue => issue.number)) + 1;
+  }
+  async deleteIssue(ref: string, expectedUpdatedAt?: string): Promise<void> {
+    await this.mutate(async () => {
+      const old = this.pickIssue(await this.snapshot(), ref); this.conflict(old, expectedUpdatedAt);
+      const previousRaw = await this.adapter.read(old.path); this.conflict({ updatedAt: '', revision: revision(previousRaw) }, old.revision);
+      await this.adapter.write(old.path, markdown({ deletedAt: this.now() }, old.body, parse(previousRaw)), previousRaw);
+    });
+  }
+  async moveIssue(ref: string, project: string, expectedUpdatedAt?: string): Promise<Issue> {
+    return this.mutate(async () => {
+      const snap = await this.snapshot(), old = this.pickIssue(snap, ref), target = this.pickProject(snap, project);
+      this.conflict(old, expectedUpdatedAt);
+      if (target.id === old.projectId) return old;
+      const number = await this.nextIssueNumber(target, snap);
+      const targetFolder = target.path.slice(0, target.path.lastIndexOf('/'));
+      const next = { ...old, projectId: target.id, number, updatedAt: this.now(), previousPaths: [...new Set([...(old.previousPaths || []), old.path])], path: `${targetFolder}/issues/${String(number).padStart(4, '0')}-${slug(old.title)}-${old.id.slice(2, 10)}.md` };
+      const previousRaw = await this.adapter.read(old.path); this.conflict({ updatedAt: '', revision: revision(previousRaw) }, old.revision);
+      const raw = markdown({ ...this.issueMeta(next, snap), previousPaths: next.previousPaths }, next.body, parse(previousRaw));
+      const timeline = old.path.slice(0, old.path.lastIndexOf('/issues/')) + `/timeline/${old.id}`;
+      const destination = `${targetFolder}/timeline/${old.id}`;
+      let movedTimeline = false;
+      await this.adapter.write(old.path, raw, previousRaw);
+      try {
+        if (await this.adapter.exists(timeline)) { await this.adapter.rename(timeline, destination); movedTimeline = true; }
+        await this.adapter.rename(old.path, next.path);
+      } catch (error) {
+        try {
+          if (movedTimeline) await this.adapter.rename(destination, timeline);
+          await this.adapter.write(old.path, previousRaw, raw);
+        } catch { throw new Error('移动未完成，原文已保留；请刷新后检查议题位置。'); }
+        throw error;
+      }
+      return this.getIssue(old.id);
     });
   }
   private async writeTimeline(issue: Issue, kind: 'comment' | 'event', body: string, author: string, event: Metadata = {}): Promise<TimelineEntry> {
@@ -252,7 +313,7 @@ export class Store implements IssueStore {
   }
   async resolve(ref: string): Promise<Resolved> {
     const r = normalizedRef(ref); const snap = await this.snapshot();
-    const issues = snap.issues.filter(i => i.id === r || matchesPath(i.path, r));
+    const issues = snap.issues.filter(i => i.id === r || matchesPath(i.path, r) || i.previousPaths?.some(path => matchesPath(path, r)));
     const projects = snap.projects.filter(p => matchesProject(p, r));
     if (issues.length + projects.length > 1) throw new Error('链接不唯一，请使用完整路径或 ID');
     if (issues.length) return { kind: 'issue', value: issues[0] };

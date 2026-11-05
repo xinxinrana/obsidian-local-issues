@@ -72,6 +72,7 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
     this.registerView(VIEW_TYPE, leaf => new IssuesView(leaf, this));
     this.addRibbonIcon('list-todo', 'Local Issues：项目', () => { void this.activate().catch(this.report); });
     this.addCommand({ id: 'open-projects', name: '打开项目', callback: () => { void this.activate().catch(this.report); } });
+    this.addCommand({ id: 'open-local-issues', name: '打开 Local Issues', callback: () => { void this.activate().catch(this.report); } });
     if (this.desktopAvailable) {
       this.addCommand({ id: 'copy-skill', name: '复制 Agent Skill', callback: () => { void this.copySkill(); } });
       this.addCommand({ id: 'copy-guide', name: '复制给 Agent 的引导语（含 skill 安装说明）', callback: () => { void this.copyGuide(); } });
@@ -138,6 +139,14 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
         path = safe(path);
         const folder = vault.getAbstractFileByPath(path);
         if (folder) await vault.trash(folder, this.desktopAvailable && vault.adapter instanceof FileSystemAdapter);
+      },
+      rename: async (path, destination) => {
+        path = safe(path); destination = safe(destination);
+        if (await vault.adapter.exists(destination)) throw new Error('目标位置已存在，请刷新后重试');
+        await folders(destination);
+        const file = vault.getAbstractFileByPath(path);
+        if (!file) throw new Error('原笔记或目录已不存在，请刷新后重试');
+        await this.app.fileManager.renameFile(file, destination);
       },
       writeBinary: async (path, data) => {
         path = safe(path); await folders(path);

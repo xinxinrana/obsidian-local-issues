@@ -46,8 +46,13 @@ class ItemView extends Component {
   constructor(leaf) { super(); this.leaf = leaf; this.app = leaf.app; this.containerEl = document.createElement('div'); this.containerEl.className = 'workspace-leaf-content'; this.containerEl.dataset.type = 'local-issues-view'; this.contentEl = this.containerEl.createDiv({ cls: 'view-content' }); document.body.append(this.containerEl); }
   async setState() {}
 }
+class Scope {
+  constructor(parent) { this.parent = parent; this.keys = []; }
+  register(modifiers, key, callback) { const handler = { modifiers, key, callback }; this.keys.push(handler); return handler; }
+  unregister(handler) { this.keys = this.keys.filter(key => key !== handler); }
+}
 class Modal extends Component {
-  constructor(app) { super(); this.app = app; this.containerEl = document.createElement('div'); this.containerEl.className = 'modal-container'; this.modalEl = this.containerEl.createDiv({ cls: 'modal' }); this.headerEl = this.modalEl.createDiv({ cls: 'modal-header' }); this.titleEl = this.headerEl.createEl('div', { cls: 'modal-title' }); this.contentEl = this.modalEl.createDiv({ cls: 'modal-content' }); }
+  constructor(app) { super(); this.scope = new Scope(app.scope); this.app = app; this.containerEl = document.createElement('div'); this.containerEl.className = 'modal-container'; this.modalEl = this.containerEl.createDiv({ cls: 'modal' }); this.headerEl = this.modalEl.createDiv({ cls: 'modal-header' }); this.titleEl = this.headerEl.createEl('div', { cls: 'modal-title' }); this.contentEl = this.modalEl.createDiv({ cls: 'modal-content' }); }
   setTitle(title) { this.titleEl.textContent = title; return this; }
   open() { document.body.append(this.containerEl); modals.push(this); this.onOpen?.(); }
   close() { this.onClose?.(); this.containerEl.remove(); const i = modals.indexOf(this); if (i >= 0) modals.splice(i, 1); this.unload(); }
@@ -99,7 +104,7 @@ class Setting {
     return c;
   }
 }
-module.exports = { installDom, Component, ItemView, Modal, AbstractInputSuggest, Menu, Notice, MarkdownRenderer,
+module.exports = { installDom, Component, ItemView, Modal, Scope, AbstractInputSuggest, Menu, Notice, MarkdownRenderer,
   Plugin, PluginSettingTab, Setting, TFile, FileSystemAdapter, Platform: { isMacOS: false, isMobile: false, isDesktopApp: true, isIosApp: false },
   setIcon(el, icon) { el.dataset.icon = icon; el.setAttribute('aria-hidden', 'true'); },
   normalizePath: s => s.replace(/\\/g, '/').replace(/\/{2,}/g, '/'), modals, notices, menus,

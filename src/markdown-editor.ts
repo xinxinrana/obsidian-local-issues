@@ -41,10 +41,13 @@ function decorations(view: EditorView, host: MarkdownHost): DecorationSet {
       for (let pos = node.from; pos <= node.to;) { const line = view.state.doc.lineAt(pos); ranges.push(Decoration.line({ class: 'li-live-code-block' }).range(line.from)); if (line.to >= node.to) break; pos = line.to + 1; }
       return false;
     }
-    if (/^(Link|Image)$/.test(name) && !selected(node.from, node.to) && !view.state.sliceDoc(node.from, node.to).includes('\n')) {
+    // Images stay as Markdown while writing, including during IME composition.
+    // Rendering them only in Preview keeps the caret and editor height stable.
+    if (name === 'Image') return false;
+    if (name === 'Link' && !selected(node.from, node.to) && !view.state.sliceDoc(node.from, node.to).includes('\n')) {
       const text = view.state.sliceDoc(node.from, node.to), match = text.match(/^!?\[([^\]]*)\]\(([^\s)]+)(?:\s+"[^"]*")?\)$/);
       if (match) {
-        ranges.push(Decoration.replace({ widget: new InlineWidget(match[1] || match[2], node.from, node.to, name === 'Image' ? host.image?.(match[2]) : undefined) }).range(node.from, node.to));
+        ranges.push(Decoration.replace({ widget: new InlineWidget(match[1] || match[2], node.from, node.to) }).range(node.from, node.to));
         replaced.push({ from: node.from, to: node.to }); return false;
       }
     }
@@ -73,7 +76,7 @@ function decorations(view: EditorView, host: MarkdownHost): DecorationSet {
   for (const visible of view.visibleRanges) {
     for (const match of view.state.sliceDoc(visible.from, visible.to).matchAll(/(!?)\[\[([^\]\n]+)\]\]/g)) {
       const from = visible.from + match.index!, to = from + match[0].length;
-      if (selected(from, to) || replaced.some(r => from < r.to && to > r.from)) continue;
+      if (match[1] || selected(from, to) || replaced.some(r => from < r.to && to > r.from)) continue;
       let blocked = false;
       for (let node = tree.resolveInner(from, 1); node; node = node.parent!) if (/Code|HTML/.test(node.name)) blocked = true;
       if (blocked || (from > 0 && view.state.sliceDoc(from - 1, from) === '\\')) continue;
@@ -85,6 +88,11 @@ function decorations(view: EditorView, host: MarkdownHost): DecorationSet {
 }
 
 export type MarkdownAction = 'bold' | 'italic' | 'link' | 'code' | 'strike' | 'heading' | 'quote' | 'list' | 'task' | 'source';
+export type MarkdownShortcut = MarkdownAction | 'submit' | 'attach';
+export const MARKDOWN_SHORTCUTS: [string[], string, MarkdownShortcut][] = [
+  [['Mod'], 'b', 'bold'], [['Mod'], 'i', 'italic'], [['Mod'], 'k', 'link'], [['Mod'], '/', 'source'],
+  [['Mod'], 'Enter', 'submit'], [['Mod', 'Shift'], 'u', 'attach'],
+];
 
 export function createMarkdownEditor(parent: HTMLElement, value: string, onChange: (value: string) => void, host: MarkdownHost = {}) {
   const mode = new Compartment(), editable = new Compartment();
@@ -165,6 +173,15 @@ export function createMarkdownEditor(parent: HTMLElement, value: string, onChang
   parent.dataset.mode = 'live';
   return Object.assign(view, {
     command(action: MarkdownAction) { const result = commands[action](view); view.focus(); return result; },
+    shortcut(action: MarkdownShortcut) {
+      if (!permitted(view)) return false;
+      if (action === 'submit' || action === 'attach') {
+        const run = action === 'submit' ? host.onSubmit : host.onAttach;
+        if (!run) return false;
+        run(); return true;
+      }
+      return commands[action](view);
+    },
     setReadOnly(readOnly: boolean) { view.dispatch({ effects: editable.reconfigure([EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)]) }); },
   });
 }

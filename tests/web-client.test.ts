@@ -244,3 +244,28 @@ test('served shared editor keeps form payload, source selection, undo and confli
     assert.equal(form.querySelector('.cm-editor'), null, '关闭原位编辑释放 CodeMirror');
   } finally { p?.close(); await f.close(); }
 });
+
+test('browser issue actions move the full conversation, confirm deletion and expose retryable errors', async () => {
+  const f = await fixture(); let p: Awaited<ReturnType<typeof page>> | undefined;
+  try {
+    const a = await f.store.createProject({ title: 'Source' }), b = await f.store.createProject({ title: 'Target' });
+    const issue = await f.store.createIssue(a.id, { title: 'Move', body: 'Body' });
+    const comment = await f.store.addComment(issue.id, 'Keep this comment');
+    p = await page(f, '/source/issues/1');
+    const move = [...p.doc.querySelectorAll<HTMLButtonElement>('aside [data-edit]')].find(button => button.textContent === '移动议题')!;
+    const form = p.edit(`[data-edit="${move.dataset.edit}"]`); p.set(form, 'project', b.id); p.submit(form);
+    await waitFor(() => p!.destinations.length === 1, form.textContent!);
+    assert.equal(p.destinations[0], '/target/issues/1');
+    assert.equal((await f.store.getIssue(issue.id)).projectId, b.id);
+    assert.equal((await f.store.snapshot()).timeline.find(entry => entry.id === comment.id)?.body, 'Keep this comment');
+    p.close(); p = await page(f, '/target/issues/1');
+    p.accept = false; p.click('[data-delete-issue]'); assert.equal(p.writes, 0); assert.equal(p.destinations.length, 0);
+    p.accept = true; p.fail(); p.click('[data-delete-issue]');
+    await waitFor(() => !!p!.doc.querySelector('aside [role=alert]'));
+    assert.match(p.doc.querySelector('aside [role=alert]')!.textContent!, /网络中断/);
+    assert.equal(p.doc.querySelector<HTMLButtonElement>('[data-delete-issue]')!.disabled, false);
+    p.click('[data-delete-issue]'); await waitFor(() => p!.destinations.length === 1);
+    assert.equal(p.destinations[0], '/target');
+    await assert.rejects(f.store.getIssue(issue.id), /找不到/);
+  } finally { p?.close(); await f.close(); }
+});

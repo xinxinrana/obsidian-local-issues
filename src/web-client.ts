@@ -62,17 +62,17 @@ export function startWebClient(services?: { request?: typeof fetch; navigate?: (
         },
       });
       editors.set(textarea, editor);
-      textarea.addEventListener('input', () => { if (textarea.value !== editor.state.doc.toString()) editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: textarea.value } }); });
+      textarea.addEventListener('input', () => { if (textarea.value !== editor.state.doc.toString()) editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: textarea.value }, selection: { anchor: textarea.value.length } }); });
       const tools = form.querySelector<HTMLElement>('.editor-tabs');
       if (tools) {
-        tools.setAttribute('role', 'toolbar'); tools.setAttribute('aria-label', 'Markdown 格式'); tools.querySelectorAll('[data-tab]').forEach(button => button.removeAttribute('role'));
+        const formatting = document.createElement('div'); formatting.className = 'editor-formatting'; formatting.setAttribute('role', 'toolbar'); formatting.setAttribute('aria-label', 'Markdown 格式'); tools.after(formatting);
         for (const [command, label, shortcut] of markdown.MARKDOWN_TOOLS) {
           const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.setAttribute('aria-label', shortcut ? `${label}（${shortcut}）` : label);
           if (shortcut) { const key = document.createElement('kbd'); key.textContent = shortcut.replace('Cmd/Ctrl+', '⌘/Ctrl+'); button.append(key); }
           button.addEventListener('mousedown', event => event.preventDefault());
           button.addEventListener('click', () => { form.querySelector<HTMLButtonElement>('[data-tab=write]')?.click(); editor.command(command); });
           if (command === 'source') { const update = () => button.setAttribute('aria-pressed', String(parent.dataset.mode === 'source')); parent.addEventListener('markdown-mode', update); update(); }
-          tools.append(button);
+          formatting.append(button);
         }
       }
     });
@@ -208,6 +208,18 @@ export function startWebClient(services?: { request?: typeof fetch; navigate?: (
     } catch (error) { feedback(host, error instanceof Error ? error.message : '删除失败，请重试。', true); }
     finally { working--; busy.delete(button); button.disabled = false; }
   }
+  async function removeIssue(button: HTMLButtonElement): Promise<void> {
+    if (busy.has(button) || working) return;
+    const warning = dirtyOthers() ? '删除议题将丢失尚未保存的编辑，确定继续吗？' : '确定删除议题及其评论吗？子议题和附件会保留。';
+    if (!window.confirm(warning)) return;
+    const host = button.closest<HTMLElement>('section')!;
+    busy.add(button); button.disabled = true; working++; feedback(host, '正在删除…');
+    try {
+      await api(`/api/issues/${encodeURIComponent(button.dataset.deleteIssue!)}`, 'DELETE', {}, button.dataset.revision);
+      leaving = true; navigate(button.dataset.destination || '/');
+    } catch (error) { feedback(host, error instanceof Error ? error.message : '删除失败，请重试。', true); }
+    finally { working--; busy.delete(button); button.disabled = false; }
+  }
   async function restoreProject(button: HTMLButtonElement): Promise<void> {
     if (busy.has(button) || working) return;
     busy.add(button); button.disabled = true; working++;
@@ -302,6 +314,7 @@ export function startWebClient(services?: { request?: typeof fetch; navigate?: (
     } else if (el.dataset.tab) void preview(el as HTMLButtonElement);
     else if (el.dataset.delete) void removeComment(el as HTMLButtonElement);
     else if (el.dataset.projectStatus) void restoreProject(el as HTMLButtonElement);
+    else if (el.dataset.deleteIssue) void removeIssue(el as HTMLButtonElement);
     else if (el.dataset.deleteProject) void removeProject(el as HTMLButtonElement);
     else if (el.dataset.batchAction) void batch(el as HTMLButtonElement);
     else if (el.hasAttribute('data-refresh-selected')) void refreshSelected(el as HTMLButtonElement);

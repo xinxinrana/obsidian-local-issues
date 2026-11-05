@@ -15,6 +15,7 @@ const HELP = `Local Issues · Obsidian 本地项目与 Issues
   issue list | view <编号/双链/ID/分享URL> | create | edit <引用>
   issue comment <引用> | close <引用> | reopen <引用>
   issue attach <引用> <文件> | share <引用>
+  issue delete <引用> | move <引用> --to <目标项目>
   comment edit <评论ID> --body "内容"
   comment delete <评论ID>
   share view <分享URL> | edit <分享URL> | comment <分享URL>
@@ -77,6 +78,8 @@ const COMMAND_HELP: Record<string, string> = {
   reopen <编号|链接>
   attach <编号|链接> <文件>
   share <编号|链接>
+  delete <编号|链接>
+  move <编号|链接> --to <目标项目>
 
 编号只在项目内唯一：跨项目操作请带 -P，或直接传链接。`,
   project: `用法: local-issues project <动作>
@@ -101,7 +104,7 @@ const COMMAND_HELP: Record<string, string> = {
 const aliases: Record<string, string> = { c: 'comments', P: 'project', t: 'title', b: 'body', F: 'body-file', l: 'label', a: 'assignee', s: 'state', S: 'search', L: 'limit', h: 'help', X: 'method', f: 'field', H: 'header' };
 const booleans = new Set(['help', 'web', 'comment', 'comments', 'version', 'force']);
 const multiples = new Set(['label', 'assignee', 'depends-on', 'add-label', 'remove-label', 'field', 'header']);
-const allowed = new Set(['project','title','body','body-file','state','status','label','assignee','milestone','parent','depends-on','due-date','author','search','limit','json','web','vault','url','if-match','help','method','field','header','comment','add-label','remove-label','description','comments','reason','dir','version','force']);
+const allowed = new Set(['project','title','body','body-file','state','status','label','assignee','milestone','parent','depends-on','due-date','author','search','limit','json','web','vault','url','if-match','help','method','field','header','comment','add-label','remove-label','description','comments','reason','dir','version','force','to']);
 function parse(argv: string[]): { args: string[]; flags: Flags } {
   const args: string[] = [], flags: Flags = {};
   for (let i = 0; i < argv.length; i++) {
@@ -348,6 +351,8 @@ async function main(): Promise<void> {
       data = await api.request(issuePath(required(ref, 'Issue 引用')), 'PATCH', patch);
     } else if (action === 'comment') { data = await api.request(subPath(required(ref, 'Issue 引用'), 'comments'), 'POST', { body: required(body(flags), '评论正文（--body 或 --body-file）'), author: val(flags, 'author') ?? 'Agent' }); warnMissingAuthor(flags); }
     else if (action === 'close' || action === 'reopen') data = await api.request(subPath(required(ref, 'Issue 引用'), action), 'POST', { ...(action === 'close' && val(flags, 'reason') ? { closeReason: val(flags, 'reason') } : {}), actor: val(flags, 'author') ?? 'Agent' });
+    else if (action === 'delete') data = await api.request(issuePath(required(ref, 'Issue 引用')), 'DELETE');
+    else if (action === 'move') data = await api.request(subPath(required(ref, 'Issue 引用'), 'move'), 'POST', { project: required(val(flags, 'to'), '目标项目（--to）') });
     else if (action === 'attach') {
       const file = resolve(required(extra, '附件文件'));
       const attachment = await api.request(subPath(required(ref, 'Issue 引用'), 'attachments'), 'POST', { name: basename(file), base64: readFileSync(file).toString('base64') });

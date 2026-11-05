@@ -566,7 +566,8 @@ https://github.com/lucide-icons/lucide
 Host API baseline: Obsidian 1.14.4; icon artwork comes from the installed host.
 Icons: archive, circle-check, circle-dot, circle-pause, circle-slash, columns-3,
 ellipsis, folders, link, list-todo, message-square, milestone, plus, refresh-cw,
-settings, table, x.
+settings, table, x, arrow-down-wide-narrow, calendar, file-pen-line, file-text,
+folder-input, git-branch, group, pencil, share-2, tags, trash-2, users.
 
 ISC License
 
