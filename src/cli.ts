@@ -15,10 +15,10 @@ const HELP = `Local Issues · Obsidian 本地项目与 Issues
   issue list | view <编号/双链/ID/分享URL> | create | edit <引用>
   issue comment <引用> | close <引用> | reopen <引用>
   issue attach <引用> <文件> | share <引用>
-  comment edit <评论ID> --body "内容"
+  comment edit <评论ID> --body "内容" [--author 名字]
   comment delete <评论ID>
   share view <分享URL> | edit <分享URL> | comment <分享URL>
-  share comment-edit <分享URL> <评论ID> --body "内容"
+  share comment-edit <分享URL> <评论ID> --body "内容" [--author 名字]
   resolve '[[笔记或Issue]]'
   api <接口路径> [-X METHOD] [-f key=value]
 
@@ -87,16 +87,17 @@ const COMMAND_HELP: Record<string, string> = {
   edit <项目> [-t 标题] [-b 描述] [--state 状态]
   delete <项目> [--force]   连目录一起删除（进废纸篓，可恢复）；项目里还有议题时必须加 --force
   share <项目>`,
-  comment: `用法: local-issues comment edit <评论ID> -b 内容 | comment delete <评论ID>
+  comment: `用法: local-issues comment edit <评论ID> -b 内容 [--author 名字] | comment delete <评论ID>
 
-评论 ID 来自 local-issues issue view <编号> -c 的时间线。`,
+评论 ID 来自 local-issues issue view <编号> -c 的时间线。
+--author 只在编辑时用来改作者；不传就保持原值。新写评论请一律带 --author <你的名字>。`,
   skill: `用法: local-issues skill [--dir <目录>]
 
 不带 --dir 时输出 SKILL.md；带 --dir 时写入 <目录>/local-issues/SKILL.md。`,
   api: `用法: local-issues api <接口路径> [-X 方法] [-f key=value]
 
 命令没覆盖的接口直接调用，例如 api /api/health、api /api/issues/5 -X PATCH -f status=closed。`,
-  share: `用法: local-issues share view <分享URL> | edit | comment | comment-edit <评论ID>`,
+  share: `用法: local-issues share view <分享URL> | edit | comment | comment-edit <评论ID> [--author 名字]`,
 };
 const aliases: Record<string, string> = { c: 'comments', P: 'project', t: 'title', b: 'body', F: 'body-file', l: 'label', a: 'assignee', s: 'state', S: 'search', L: 'limit', h: 'help', X: 'method', f: 'field', H: 'header' };
 const booleans = new Set(['help', 'web', 'comment', 'comments', 'version', 'force']);
@@ -280,7 +281,7 @@ async function main(): Promise<void> {
     }
     else if (action === 'close' || action === 'reopen') data = await api.request(url.pathname + url.search, 'PATCH', { status: action === 'close' ? 'closed' : 'open', ...(action === 'close' && val(flags, 'reason') ? { closeReason: val(flags, 'reason') } : {}), actor: val(flags, 'author') ?? 'Agent' });
     else if (action === 'comment') { url.pathname = url.pathname.replace(/\/resolve$/, '/comments'); data = await api.request(url.pathname + url.search, 'POST', { body: required(body(flags), '评论正文（--body 或 --body-file）'), author: val(flags, 'author') ?? 'Agent' }); warnMissingAuthor(flags); }
-    else if (action === 'comment-edit') { url.pathname = url.pathname.replace(/\/resolve$/, `/comments/${encodeURIComponent(required(extra, '评论ID'))}`); data = await api.request(url.pathname + url.search, 'PATCH', { body: required(body(flags), '评论正文（--body 或 --body-file）') }); }
+    else if (action === 'comment-edit') { url.pathname = url.pathname.replace(/\/resolve$/, `/comments/${encodeURIComponent(required(extra, '评论ID'))}`); data = await api.request(url.pathname + url.search, 'PATCH', { body: required(body(flags), '评论正文（--body 或 --body-file）'), ...(val(flags, 'author') ? { author: val(flags, 'author') } : {}) }); }
     else throw new Error('分享链接支持 view、edit、comment、comment-edit、close、reopen。');
   } else if (command === 'repo') {
     if (action === 'view' && resourceUrl && resource?.kind === 'repo') data = await api.request(resourceUrl.toString());
@@ -355,7 +356,7 @@ async function main(): Promise<void> {
       data = attachment;
     } else if (action === 'share') { const current = await api.request(issuePath(required(ref, 'Issue 引用'))); data = await api.request(`/api/links?ref=${encodeURIComponent(current.issue.id)}`); }
     else throw new Error('未知 Issue 命令。运行 local-issues --help 查看用法。');
-  } else if (command === 'comment' && action === 'edit') data = await api.request(`/api/comments/${encodeURIComponent(required(ref, '评论 ID'))}`, 'PATCH', { body: required(body(flags), '评论正文（--body 或 --body-file）') });
+  } else if (command === 'comment' && action === 'edit') data = await api.request(`/api/comments/${encodeURIComponent(required(ref, '评论 ID'))}`, 'PATCH', { body: required(body(flags), '评论正文（--body 或 --body-file）'), ...(val(flags, 'author') ? { author: val(flags, 'author') } : {}) });
   else if (command === 'comment' && action === 'delete') data = await api.request(`/api/comments/${encodeURIComponent(required(ref, '评论 ID'))}`, 'DELETE');
   else if (command === 'resolve') data = await api.request(`/api/resolve?ref=${encodeURIComponent(required(action, '双链或引用'))}`);
   else if (command === 'api') {

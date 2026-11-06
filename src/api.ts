@@ -36,6 +36,11 @@ function pick<T>(data: Record<string, unknown>, names: string[]): T {
   for (const name of names) if (Object.hasOwn(data, name)) result[name] = data[name];
   return result as T;
 }
+/** 编辑评论时可以顺带改作者：`author` 为主，兼容 `actor`（与 Issue 编辑一致）；没传就保持原值。 */
+function optionalAuthor(data: Record<string, unknown>): string | undefined {
+  const value = typeof data.author === 'string' ? data.author : typeof data.actor === 'string' ? data.actor : undefined;
+  return value && value.trim() ? value : undefined;
+}
 const PROJECT_FIELDS = ['title', 'description', 'status', 'dueDate'];
 const ISSUE_FIELDS = ['title', 'body', 'status', 'closeReason', 'labels', 'milestone', 'assignees', 'parent', 'dependencies', 'dueDate', 'author'];
 function issueUpdate(body: Record<string, unknown>): IssuePatch {
@@ -262,7 +267,7 @@ export async function startApi(options: ApiOptions): Promise<{ close: () => Prom
           if (!entry) throw new HttpError(403, '此评论不属于分享的 Issue。', 'FORBIDDEN');
           const body = await readBody(req);
           if (method === 'DELETE') { await store.deleteComment(entry.id, expected(req, body)); data = { deleted: true }; }
-          else data = await store.editComment(entry.id, str(body.body, 'body'), expected(req, body));
+          else data = await store.editComment(entry.id, str(body.body, 'body'), expected(req, body), optionalAuthor(body));
         } else throw new HttpError(404, '分享接口不存在。', 'NOT_FOUND');
       } else if (parts[1] === 'links' && parts.length === 2 && method === 'GET') {
         const path = await routes.path(store, url.searchParams.get('ref') ?? undefined, url.searchParams.get('scope') === 'issues' ? 'issues' : undefined);
@@ -312,7 +317,7 @@ export async function startApi(options: ApiOptions): Promise<{ close: () => Prom
           } else throw new HttpError(404, 'Issue 接口不存在。', 'NOT_FOUND');
         } else throw new HttpError(404, 'Issue 接口不存在。', 'NOT_FOUND');
       } else if (parts[1] === 'comments' && parts.length === 3 && method === 'PATCH') {
-        const body = await readBody(req); data = await store.editComment(parts[2], str(body.body, 'body'), expected(req, body));
+        const body = await readBody(req); data = await store.editComment(parts[2], str(body.body, 'body'), expected(req, body), optionalAuthor(body));
       } else if (parts[1] === 'comments' && parts.length === 3 && method === 'DELETE') {
         const body = await readBody(req); await store.deleteComment(parts[2], expected(req, body)); data = { deleted: true };
       } else if (parts[1] === 'open' && parts.length === 2 && method === 'POST' && options.open) {

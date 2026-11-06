@@ -36,6 +36,20 @@ test('comment deletion checks revisions and preserves a recoverable Markdown rec
   await assert.rejects(store.deleteComment(event.id), /找不到评论/);
 });
 
+test('editing a comment can correct its author, and omitting the author keeps the previous one', async () => {
+  const { adapter, store } = setup();
+  const project = await store.createProject({ title: '改作者' });
+  const issue = await store.createIssue(project.id, { title: '讨论' });
+  const comment = await store.addComment(issue.id, '原评论', 'Agent');
+  assert.equal(comment.author, 'Agent');
+  const fixed = await store.editComment(comment.id, '原评论', comment.updatedAt, 'WorkBuddy');
+  assert.equal(fixed.author, 'WorkBuddy');
+  assert.match(adapter.files.get(comment.path)!, /author: WorkBuddy/);
+  const kept = await store.editComment(comment.id, '原评论（改正文）', fixed.updatedAt);
+  assert.equal(kept.author, 'WorkBuddy');
+  assert.equal((await new Store(adapter).snapshot()).timeline[0].author, 'WorkBuddy');
+});
+
 test('project / issue / multiple comments / close and reopen roundtrip remains readable Markdown', async () => {
   const { adapter, store } = setup();
   const p = await store.createProject({ title: '本地项目', description: '项目正文 [[知识库]]', dueDate: '2026-12-31' });

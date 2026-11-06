@@ -15,6 +15,9 @@ test('API uses Markdown store for project → issue → comments, edits and stat
     const second = await f.request(`/api/issues/${id}/comments`, 'POST', { body: '第二条评论' });
     assert.equal(second.status, 201);
     assert.equal((await f.request(`/api/comments/${comment.data.id}`, 'PATCH', { body: '修改后的评论' })).data.body, '修改后的评论');
+    const fixedAuthor = await f.request(`/api/comments/${comment.data.id}`, 'PATCH', { body: '修改后的评论', author: 'WorkBuddy' });
+    assert.equal(fixedAuthor.data.author, 'WorkBuddy');
+    assert.equal((await f.request(`/api/comments/${comment.data.id}`, 'PATCH', { body: '再改正文' })).data.author, 'WorkBuddy');
     const closed = await f.request(`/api/issues/${id}/close`, 'POST', { closeReason: 'on-hold' }); assert.equal(closed.data.status, 'closed'); assert.equal(closed.data.closeReason, 'on-hold');
     assert.equal((await f.request(`/api/issues/${id}/reopen`, 'POST')).data.status, 'open');
     const detail = await f.request(`/api/issues/${id}`);

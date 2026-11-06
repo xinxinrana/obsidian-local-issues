@@ -59,10 +59,10 @@ var HELP = `Local Issues \xB7 Obsidian \u672C\u5730\u9879\u76EE\u4E0E Issues
   issue list | view <\u7F16\u53F7/\u53CC\u94FE/ID/\u5206\u4EABURL> | create | edit <\u5F15\u7528>
   issue comment <\u5F15\u7528> | close <\u5F15\u7528> | reopen <\u5F15\u7528>
   issue attach <\u5F15\u7528> <\u6587\u4EF6> | share <\u5F15\u7528>
-  comment edit <\u8BC4\u8BBAID> --body "\u5185\u5BB9"
+  comment edit <\u8BC4\u8BBAID> --body "\u5185\u5BB9" [--author \u540D\u5B57]
   comment delete <\u8BC4\u8BBAID>
   share view <\u5206\u4EABURL> | edit <\u5206\u4EABURL> | comment <\u5206\u4EABURL>
-  share comment-edit <\u5206\u4EABURL> <\u8BC4\u8BBAID> --body "\u5185\u5BB9"
+  share comment-edit <\u5206\u4EABURL> <\u8BC4\u8BBAID> --body "\u5185\u5BB9" [--author \u540D\u5B57]
   resolve '[[\u7B14\u8BB0\u6216Issue]]'
   api <\u63A5\u53E3\u8DEF\u5F84> [-X METHOD] [-f key=value]
 
@@ -130,16 +130,17 @@ var COMMAND_HELP = {
   edit <\u9879\u76EE> [-t \u6807\u9898] [-b \u63CF\u8FF0] [--state \u72B6\u6001]
   delete <\u9879\u76EE> [--force]   \u8FDE\u76EE\u5F55\u4E00\u8D77\u5220\u9664\uFF08\u8FDB\u5E9F\u7EB8\u7BD3\uFF0C\u53EF\u6062\u590D\uFF09\uFF1B\u9879\u76EE\u91CC\u8FD8\u6709\u8BAE\u9898\u65F6\u5FC5\u987B\u52A0 --force
   share <\u9879\u76EE>`,
-  comment: `\u7528\u6CD5: local-issues comment edit <\u8BC4\u8BBAID> -b \u5185\u5BB9 | comment delete <\u8BC4\u8BBAID>
+  comment: `\u7528\u6CD5: local-issues comment edit <\u8BC4\u8BBAID> -b \u5185\u5BB9 [--author \u540D\u5B57] | comment delete <\u8BC4\u8BBAID>
 
-\u8BC4\u8BBA ID \u6765\u81EA local-issues issue view <\u7F16\u53F7> -c \u7684\u65F6\u95F4\u7EBF\u3002`,
+\u8BC4\u8BBA ID \u6765\u81EA local-issues issue view <\u7F16\u53F7> -c \u7684\u65F6\u95F4\u7EBF\u3002
+--author \u53EA\u5728\u7F16\u8F91\u65F6\u7528\u6765\u6539\u4F5C\u8005\uFF1B\u4E0D\u4F20\u5C31\u4FDD\u6301\u539F\u503C\u3002\u65B0\u5199\u8BC4\u8BBA\u8BF7\u4E00\u5F8B\u5E26 --author <\u4F60\u7684\u540D\u5B57>\u3002`,
   skill: `\u7528\u6CD5: local-issues skill [--dir <\u76EE\u5F55>]
 
 \u4E0D\u5E26 --dir \u65F6\u8F93\u51FA SKILL.md\uFF1B\u5E26 --dir \u65F6\u5199\u5165 <\u76EE\u5F55>/local-issues/SKILL.md\u3002`,
   api: `\u7528\u6CD5: local-issues api <\u63A5\u53E3\u8DEF\u5F84> [-X \u65B9\u6CD5] [-f key=value]
 
 \u547D\u4EE4\u6CA1\u8986\u76D6\u7684\u63A5\u53E3\u76F4\u63A5\u8C03\u7528\uFF0C\u4F8B\u5982 api /api/health\u3001api /api/issues/5 -X PATCH -f status=closed\u3002`,
-  share: `\u7528\u6CD5: local-issues share view <\u5206\u4EABURL> | edit | comment | comment-edit <\u8BC4\u8BBAID>`
+  share: `\u7528\u6CD5: local-issues share view <\u5206\u4EABURL> | edit | comment | comment-edit <\u8BC4\u8BBAID> [--author \u540D\u5B57]`
 };
 var aliases = { c: "comments", P: "project", t: "title", b: "body", F: "body-file", l: "label", a: "assignee", s: "state", S: "search", L: "limit", h: "help", X: "method", f: "field", H: "header" };
 var booleans = /* @__PURE__ */ new Set(["help", "web", "comment", "comments", "version", "force"]);
@@ -401,7 +402,7 @@ async function main() {
       warnMissingAuthor(flags);
     } else if (action === "comment-edit") {
       url.pathname = url.pathname.replace(/\/resolve$/, `/comments/${encodeURIComponent(required(extra, "\u8BC4\u8BBAID"))}`);
-      data = await api.request(url.pathname + url.search, "PATCH", { body: required(body(flags), "\u8BC4\u8BBA\u6B63\u6587\uFF08--body \u6216 --body-file\uFF09") });
+      data = await api.request(url.pathname + url.search, "PATCH", { body: required(body(flags), "\u8BC4\u8BBA\u6B63\u6587\uFF08--body \u6216 --body-file\uFF09"), ...val(flags, "author") ? { author: val(flags, "author") } : {} });
     } else throw new Error("\u5206\u4EAB\u94FE\u63A5\u652F\u6301 view\u3001edit\u3001comment\u3001comment-edit\u3001close\u3001reopen\u3002");
   } else if (command === "repo") {
     if (action === "view" && resourceUrl && resource?.kind === "repo") data = await api.request(resourceUrl.toString());
@@ -494,7 +495,7 @@ ${note}` : ""}`;
       const current = await api.request(issuePath(required(ref, "Issue \u5F15\u7528")));
       data = await api.request(`/api/links?ref=${encodeURIComponent(current.issue.id)}`);
     } else throw new Error("\u672A\u77E5 Issue \u547D\u4EE4\u3002\u8FD0\u884C local-issues --help \u67E5\u770B\u7528\u6CD5\u3002");
-  } else if (command === "comment" && action === "edit") data = await api.request(`/api/comments/${encodeURIComponent(required(ref, "\u8BC4\u8BBA ID"))}`, "PATCH", { body: required(body(flags), "\u8BC4\u8BBA\u6B63\u6587\uFF08--body \u6216 --body-file\uFF09") });
+  } else if (command === "comment" && action === "edit") data = await api.request(`/api/comments/${encodeURIComponent(required(ref, "\u8BC4\u8BBA ID"))}`, "PATCH", { body: required(body(flags), "\u8BC4\u8BBA\u6B63\u6587\uFF08--body \u6216 --body-file\uFF09"), ...val(flags, "author") ? { author: val(flags, "author") } : {} });
   else if (command === "comment" && action === "delete") data = await api.request(`/api/comments/${encodeURIComponent(required(ref, "\u8BC4\u8BBA ID"))}`, "DELETE");
   else if (command === "resolve") data = await api.request(`/api/resolve?ref=${encodeURIComponent(required(action, "\u53CC\u94FE\u6216\u5F15\u7528"))}`);
   else if (command === "api") {
