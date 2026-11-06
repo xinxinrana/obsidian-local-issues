@@ -30,7 +30,7 @@ test('mobile bundle works without Node globals/modules and exposes only manual v
   vm.runInNewContext(built.outputFiles[0].text, context);
   const f = await module.exports.createMobileFixture();
   const wait = async (check: () => boolean | Promise<boolean>) => { for (let n = 0; n < 300; n++) { if (await check()) return; await new Promise(r => setTimeout(r, 5)); } assert.fail(f.mock.notices.join(' / ')); };
-  const click = (label: string, parent: Element = f.view.contentEl) => { const button = [...parent.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === label); assert.ok(button, label); button.click(); };
+  const click = (label: string, parent: Element = f.view.contentEl) => { const button = [...parent.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === label || b.getAttribute('aria-label') === label); assert.ok(button, label); button.click(); };
   const reopened: any[] = [];
   try {
     assert.deepEqual(requested, []); assert.equal(f.app.savedData.apiEnabled, true, 'Mobile leaves synchronized desktop preferences intact');
@@ -88,10 +88,27 @@ test('mobile bundle works without Node globals/modules and exposes only manual v
     await wait(async () => (await f.plugin.store.getIssue(issue.id)).status === 'closed');
     f.plugin.openSettings(); assert.doesNotMatch(f.mock.modals.at(-1).contentEl.textContent, /Agent|CLI|API|端口|分享/); f.mock.modals.at(-1).close();
     assert.equal(listeners, 2); assert.deepEqual(requested, []);
+    const otherProject = (await f.plugin.store.snapshot()).projects.find((p: any) => p.title === '日常记录');
+    const externalParent = await f.plugin.store.createIssue(otherProject.id, { title: '跨项目父议题测试' });
     await f.plugin.activate(project.id); await wait(() => !!f.view.contentEl.querySelector('[aria-label="新建 Issue"]'));
     click('新建', f.view.contentEl.querySelector('.li-mobile-nav'));
     await wait(() => !!f.view.contentEl.querySelector('.li-mobile-edit-page input[placeholder="简洁描述这件事"]'));
     const form = f.view.contentEl.querySelector('.li-mobile-edit-page');
+    click('选择父议题', form);
+    const parentPicker = f.mock.modals.at(-1);
+    assert.equal(parentPicker.contentEl.querySelector('.li-other-projects').open, false, '其他项目默认折叠');
+    assert.equal(parentPicker.contentEl.querySelector(`[data-issue-id="${externalParent.id}"]`), null, '折叠时不堆放其他项目选项');
+    const parentSearch = parentPicker.contentEl.querySelector('[aria-label="搜索父议题"]');
+    parentSearch.value = '跨项目父议题'; parentSearch.dispatchEvent(new w.Event('input', { bubbles: true }));
+    assert.match(parentPicker.contentEl.querySelector('.li-other-projects summary').textContent, /1 条匹配/);
+    const otherGroup = parentPicker.contentEl.querySelector('.li-other-projects'); otherGroup.open = true;
+    await wait(() => !!parentPicker.contentEl.querySelector(`[data-issue-id="${externalParent.id}"]`));
+    parentPicker.contentEl.querySelector(`[data-issue-id="${externalParent.id}"]`).click();
+    assert.equal(form.querySelector('[aria-label="父议题"]').value, externalParent.id);
+    assert.equal(f.mock.modals.length, 0);
+    assert.ok(f.plugin.draftCache.read(`new-issue:${project.id}:`).fields.includes(externalParent.id), '父议题选择立即写入草稿');
+    click('选择父议题', form); click('无父议题', f.mock.modals.at(-1).modalEl);
+    assert.equal(form.querySelector('[aria-label="父议题"]').value, '');
     const title = form.querySelector('input[placeholder="简洁描述这件事"]'); title.value = '手机输入到一半的标题'; title.dispatchEvent(new w.Event('input', { bubbles: true }));
     const label = form.querySelector('[aria-label="标签"]'); label.value = '重要, 未输入完，'; label.dispatchEvent(new w.Event('input', { bubbles: true }));
     const attachment = await f.plugin.store.attach(project.id, '草稿图片.png', new Uint8Array([1, 2, 3]));

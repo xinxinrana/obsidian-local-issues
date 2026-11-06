@@ -37,7 +37,7 @@ test('real view supports project → issue → Markdown comments, pasted and dro
   const leaf = { app, async setViewState(next: any) { const previous = view.getState(); const result = { history: false }; await view.setState(next.state || {}, result); if (result.history) nativeNavigations.push({ previous, next: view.getState() }); } };
   const view = new module.exports.IssuesView(leaf, host);
   const click = (name: string, parent: HTMLElement = view.contentEl) => {
-    const button = [...parent.querySelectorAll('button')].find(b => b.textContent === name) as HTMLButtonElement;
+    const button = [...parent.querySelectorAll('button')].find(b => b.textContent === name || b.getAttribute('aria-label') === name) as HTMLButtonElement;
     assert.ok(button, `缺少按钮 ${name}`); button.click();
   };
   const deleteDialog = () => mock.modals.find((m: any) => m.modalEl.classList.contains('li-delete-dialog'))?.modalEl as HTMLElement | undefined;
@@ -362,8 +362,12 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     editProperty('截止日期'); fill(propertyArea().querySelector('input'), '2026-11-15'); click('保存', propertyArea());
     await until(async () => (await store.getIssue(issue.id)).dueDate === '2026-11-15' && !propertyArea(), '直接修改日期');
     assert.equal((await store.getIssue(issue.id)).body, propertySnapshot.body);
-    editProperty('父议题');
-    const parentChoice = propertyArea().querySelector('select')!; parentChoice.value = child.id;
+    const chooseParent = (id: string) => {
+      click('选择父议题', propertyArea()); const picker = mock.modals.at(-1);
+      if (!id) click('无父议题', picker.contentEl);
+      else { const option = picker.contentEl.querySelector<HTMLButtonElement>(`[data-issue-id="${id}"]`); assert.ok(option, '父议题候选'); option.click(); }
+    };
+    editProperty('父议题'); chooseParent(child.id);
     click('保存', propertyArea());
     await until(() => /循环/.test(propertyArea().querySelector('[role="alert"]')!.textContent!), '父议题循环错误持续显示');
     assert.equal((await store.getIssue(issue.id)).parent, '');
@@ -373,11 +377,14 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     assert.deepEqual((await store.getIssue(issue.id)).dependencies, []);
     click('取消', propertyArea());
     const relationTarget = await store.createIssue(project.id, { title: '关联目标' }); await view.refresh();
-    editProperty('父议题'); propertyArea().querySelector('select')!.value = relationTarget.id; click('保存', propertyArea());
+    editProperty('父议题'); chooseParent(relationTarget.id); click('保存', propertyArea());
     await until(async () => (await store.getIssue(issue.id)).parent === relationTarget.id && !propertyArea(), '直接设置父议题');
-    editProperty('父议题'); propertyArea().querySelector('select')!.value = ''; click('保存', propertyArea());
+    editProperty('父议题'); chooseParent(''); click('保存', propertyArea());
     await until(async () => !(await store.getIssue(issue.id)).parent && !propertyArea(), '清除父议题');
-    editProperty('依赖'); fill(propertyArea().querySelector('input'), '关联目标'); click(`界面项目 #${relationTarget.number} 关联目标`, propertyArea()); click('保存', propertyArea());
+    editProperty('依赖'); fill(propertyArea().querySelector('input'), '关联目标');
+    const composingEnter = new dom.window.KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true, cancelable: true });
+    propertyArea().querySelector('input')!.dispatchEvent(composingEnter); assert.equal(composingEnter.defaultPrevented, false, '中文输入法确认候选时不提交关联');
+    click(`界面项目 #${relationTarget.number} 关联目标`, propertyArea()); click('保存', propertyArea());
     await until(async () => (await store.getIssue(issue.id)).dependencies.includes(relationTarget.id) && !propertyArea(), '搜索并添加依赖');
     editProperty('依赖'); propertyArea().querySelector<HTMLButtonElement>('[aria-label="移除依赖 关联目标"]')!.click(); click('保存', propertyArea());
     await until(async () => !(await store.getIssue(issue.id)).dependencies.length && !propertyArea(), '移除依赖');

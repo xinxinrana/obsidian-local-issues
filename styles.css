@@ -368,6 +368,26 @@ body:has(.li-no-tooltips:hover) .tooltip,
 .local-issues .li-field > label.li-with-icon { display: flex; align-items: center; gap: 6px; }
 .is-mobile .local-issues .li-editor-tabs { flex-wrap: nowrap; width: auto; }
 
+.local-issues .li-parent-picker { width: 100%; height: auto; min-height: 32px; padding: 6px 10px; text-align: start; white-space: normal; overflow-wrap: anywhere; }
+.local-issues .li-issue-options { display: block; min-width: 0; }
+.local-issues .li-issue-options-list { display: flex; flex-direction: column; gap: 2px; }
+.local-issues .li-issue-options-label, .local-issues .li-issue-options-empty { padding: 6px 8px; font-size: var(--font-ui-small); }
+.local-issues button.li-issue-option { display: flex; align-items: flex-start; gap: 8px; width: 100%; max-width: 100%; height: auto; min-height: 38px; padding: 8px; border: 0; border-radius: var(--radius-s); box-shadow: none; background: transparent; color: var(--text-normal); text-align: start; }
+.local-issues .li-issue-option-body { display: flex; flex-direction: column; min-width: 0; }
+.local-issues .li-issue-option-title { overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.45; }
+.local-issues .li-issue-option-project { font-size: var(--font-ui-smaller); }
+.local-issues .li-issue-option .li-status { margin-top: 2px; }
+.local-issues .li-issue-option .li-status > span:not(.li-icon) { display: none; }
+.local-issues button.li-issue-option[aria-pressed="true"] { background: var(--background-modifier-hover); }
+.local-issues .li-other-projects { border-top: 1px solid var(--li-border); margin-top: 6px; padding-top: 6px; }
+.local-issues .li-other-projects > summary { min-height: 32px; padding: 6px 8px; color: var(--text-muted); cursor: pointer; font-size: var(--font-ui-small); }
+.modal.li-issue-picker-modal { width: min(600px, calc(100vw - 32px)); }
+.li-issue-picker-modal .modal-content { display: flex; flex-direction: column; min-height: 0; }
+.li-issue-picker-modal input[type="search"] { width: 100%; min-height: 36px; flex: 0 0 auto; }
+.li-issue-picker-modal .li-issue-options { max-height: 50dvh; overflow-y: auto; }
+.li-issue-picker-modal .li-issue-picker-clear { align-self: flex-start; margin-block: 6px; }
+.is-mobile .local-issues :is(button.li-issue-option,.li-other-projects > summary) { min-height: 44px; }
+
 /* Touch devices can retain :hover after tapping; only mouse interfaces use it. */
 @media (hover: hover) and (pointer: fine) {
   body:not(.is-mobile) .local-issues :is(button.li-subtle,button.li-breadcrumb,button.li-more):hover { background: var(--background-modifier-hover); color: var(--text-normal); }

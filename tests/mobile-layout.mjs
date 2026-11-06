@@ -21,6 +21,7 @@ try {
   await page.setContent(`<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>${theme}\n${css}</style><body><div class="test-host-top">Local Issues · Obsidian</div><div class="test-host-bottom">Obsidian 导航栏</div></body>`);
   await page.addScriptTag({ content: bundle.outputFiles[0].text });
   await page.evaluate(async () => { window.fixture = await MobileFixture.createMobileFixture(); window.sample = await fixture.seed(); for (let n = 0; n < 12; n++) await fixture.plugin.store.createProject({ title: `示例项目 ${n + 1}`, description: '日常计划、想法和进度。' }); await fixture.view.refresh(); });
+  await page.evaluate(async () => { const project = (await fixture.plugin.store.snapshot()).projects.find(p => p.title === '日常记录'); window.foreignParent = await fixture.plugin.store.createIssue(project.id, { title: '跨项目关联目标' }); await fixture.view.refresh(); });
   const fits = async name => {
     const size = await page.evaluate(() => { const pane = document.querySelector('.view-content'); const shell = document.querySelector('.li-mobile-page'); return { page: document.documentElement.scrollWidth, viewport: innerWidth, pane: pane.clientWidth, content: pane.scrollWidth, pageHeight: document.documentElement.scrollHeight, height: innerHeight, outerHeight: pane.scrollHeight, outerAvailable: pane.clientHeight, bottom: shell.getBoundingClientRect().bottom, visibleBottom: visualViewport.height + visualViewport.offsetTop }; });
     assert.ok(size.page <= size.viewport + 1 && size.content <= size.pane + 1 && size.pageHeight <= size.height + 1 && size.outerHeight <= size.outerAvailable + 1 && size.bottom <= size.visibleBottom + 1, `${name}: ${JSON.stringify(size)}`);
@@ -59,6 +60,22 @@ try {
   await page.evaluate(() => fixture.view.navigate(sample.project.id, sample.issue.id)); await page.locator('.li-description').waitFor(); await fits('议题正文');
   assert.equal(await page.locator('.li-mobile-properties').evaluate(el => el.open), false);
   assert.equal(await page.locator('.li-composer .cm-editor').count(), 0, '阅读时不应预先展开评论编辑器');
+  await page.locator('.li-mobile-properties > summary').tap();
+  await page.getByRole('button', { name: '修改父议题', exact: true }).tap();
+  await editPage.getByRole('button', { name: '选择父议题', exact: true }).tap();
+  const parentPicker = page.locator('.li-issue-picker-modal'); await parentPicker.waitFor();
+  const pickerBounds = await parentPicker.boundingBox();
+  assert.ok(pickerBounds.x >= 0 && pickerBounds.x + pickerBounds.width <= 402 && pickerBounds.y + pickerBounds.height <= 874, '父议题选择面板必须适配手机');
+  assert.equal(await parentPicker.locator('.li-other-projects').evaluate(el => el.open), false);
+  await parentPicker.getByRole('searchbox', { name: '搜索父议题', exact: true }).fill('跨项目关联目标');
+  await parentPicker.locator('.li-other-projects > summary').tap();
+  const parentOption = parentPicker.getByRole('button', { name: /日常记录 #1 跨项目关联目标/ });
+  const optionBounds = await parentOption.boundingBox(); assert.ok(optionBounds.height >= 44, '关联选项需要足够的触控区域');
+  await page.screenshot({ scale: 'css', path: join(output, 'parent-picker-iphone.png') });
+  await parentOption.tap(); await (await navButtonVisible('保存')).tap();
+  await page.waitForFunction(async () => (await fixture.plugin.store.getIssue(sample.issue.id)).parent === foreignParent.id);
+  await page.locator('.li-mobile-properties > summary').tap();
+
   await page.screenshot({ scale: 'css', path: join(output, 'issue-iphone17.png') });
   await page.locator('.li-description').getByRole('button', { name: '编辑', exact: true }).tap(); await editPage.locator('.cm-editor').waitFor();
   await page.evaluate(() => fixture.setMarkdown(document.querySelector('.li-mobile-edit-page'), '中文输入与换行。\n\n' + '这是手机上的长段落。'.repeat(80)));
@@ -145,6 +162,17 @@ try {
   await desktopTitle.hover();
   await hoverPage.waitForFunction(() => getComputedStyle(document.querySelector('.li-issue-title')).color === 'rgb(129, 84, 198)', null, { timeout: 3000 });
   assert.equal(await desktopTitle.evaluate(el => getComputedStyle(el).color), 'rgb(129, 84, 198)', '桌面鼠标仍有标题悬停反馈');
+  await hoverPage.setViewportSize({ width: 1280, height: 900 });
+  await hoverPage.evaluate(() => fixture.view.navigate(sample.project.id, sample.issue.id));
+  await hoverPage.getByRole('button', { name: '修改父议题', exact: true }).click();
+  await hoverPage.getByRole('button', { name: '选择父议题', exact: true }).click();
+  const desktopPicker = hoverPage.locator('.li-issue-picker-modal'); await desktopPicker.waitFor();
+  const desktopBounds = await desktopPicker.boundingBox(); assert.ok(desktopBounds.width <= 600 && desktopBounds.x >= 0, '桌面选择器保持紧凑宽度');
+  await hoverPage.screenshot({ scale: 'css', path: join(output, 'parent-picker-desktop.png') });
+  await desktopPicker.getByRole('searchbox', { name: '搜索父议题' }).fill('已完成的议题');
+  await desktopPicker.getByRole('searchbox', { name: '搜索父议题' }).press('Enter');
+  await desktopPicker.waitFor({ state: 'detached' });
+  assert.equal(await hoverPage.locator('.li-property-editor input[type=hidden]').inputValue(), await hoverPage.evaluate(async () => (await fixture.plugin.store.snapshot()).issues.find(issue => issue.title === '已完成的议题').id));
   await hoverPage.evaluate(() => fixture.close()); await hoverContext.close();
   console.log('WebKit hover 检查通过：移动端标题、议题底色保持稳定，桌面鼠标悬停反馈保留。');
 } catch (error) {

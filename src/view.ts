@@ -4,6 +4,7 @@ import { suppressTooltips } from './tooltips';
 import { MobileModal, observeMobileViewport } from './mobile';
 import { mobilePage, type MobilePage } from './mobile-layout';
 import { Drafts, type DraftEditor } from './drafts';
+import { issueOptions } from './issue-options';
 import { ISSUE_STATUSES, STATUS_NAMES, CLOSE_REASON_NAMES, issueLink, CloseReason, Issue, IssueInput, IssuePatch, IssueStore, Project, ProjectStatus, Snapshot, TimelineEntry } from './types';
 
 export const VIEW_TYPE = 'local-issues-view';
@@ -49,6 +50,7 @@ export class IssuesView extends ItemView {
   private activeEdit?: { element: HTMLElement; label: string; dirty: () => boolean; discard: () => void };
   private discardPrompt?: Modal;
   private deletePrompt?: Modal;
+  private relationPicker?: Modal;
   private submissionNotice?: Notice;
   private submittingComment = false;
   private data: Snapshot = { projects: [], issues: [], timeline: [], warnings: [] };
@@ -94,7 +96,7 @@ export class IssuesView extends ItemView {
   getDisplayText() { return 'Local Issues'; }
   getIcon() { return 'list-todo'; }
   async onOpen() { this.closed = false; this.disposeViewport?.(); this.disposeViewport = observeMobileViewport(this.contentEl); suppressTooltips(this.contentEl); this.renderScope.load(); await this.refresh(); }
-  async onClose() { this.closed = true; ++this.generation; this.disposeViewport?.(); this.disposeViewport = undefined; this.deletePrompt?.close(); this.submissionNotice?.hide(); this.discardPrompt?.close(); this.stopEditing(); this.captureDrafts(); this.renderScope.unload(); }
+  async onClose() { this.closed = true; ++this.generation; this.disposeViewport?.(); this.disposeViewport = undefined; this.deletePrompt?.close(); this.relationPicker?.close(); this.submissionNotice?.hide(); this.discardPrompt?.close(); this.stopEditing(); this.captureDrafts(); this.renderScope.unload(); }
   getState() { return { projectId: this.projectId, issueId: this.issueId, creating: this.creating, query: this.query, projectState: this.state, issueState: this.issueState, mode: this.mode, label: this.label, milestone: this.milestone, sort: this.sort, group: this.group }; }
   getEphemeralState() { return { scrollTop: (this.phone?.content || this.contentEl).scrollTop }; }
   setEphemeralState(state: { scrollTop?: number }) { if (typeof state?.scrollTop === 'number' && Number.isFinite(state.scrollTop)) (this.phone?.content || this.contentEl).scrollTop = Math.max(0, state.scrollTop); }
@@ -122,7 +124,7 @@ export class IssuesView extends ItemView {
   private locateEditing() {
     if (!this.editingInline) return;
     const element = this.activeEdit!.element;
-    const focus = element.querySelector<HTMLElement>('.cm-content, input, select') || element.querySelector<HTMLElement>('button');
+    const focus = element.querySelector<HTMLElement>('.cm-content, input:not([type="hidden"]), select') || element.querySelector<HTMLElement>('button');
     if (this.phone) {
       if (focus?.matches('input,select')) focus.scrollIntoView?.({ block: 'nearest' });
     } else element.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
@@ -652,14 +654,14 @@ export class IssuesView extends ItemView {
     });
     const parent = this.data.issues.find(i => i.id === issue.parent);
     this.editableProperty(sidebar, issue, '父议题', parent ? `#${parent.number} ${parent.title}` : '', (area, current) => {
-      const field = select(area, [['', '无'], ...(issue.parent && !parent ? [[issue.parent, issue.parent] as [string, string]] : []), ...this.data.issues.filter(i => i.id !== issue.id).map(i => [i.id, `${this.data.projects.find(p => p.id === i.projectId)?.title} #${i.number} ${i.title}`] as [string, string])], current.parent, () => {});
+      const field = this.parentInput(area, issue.projectId, issue, current.parent);
       return () => ({ parent: field.value });
     }, parent);
     const depField = this.editableProperty(sidebar, issue, '依赖', issue.dependencies.length ? `${issue.dependencies.length} 个依赖` : '无依赖', (area, current) => {
       const chosen = new Set(current.dependencies);
       const chips = el(area, 'div', 'li-selected-dependencies');
       const search = input(area, '搜索依赖议题');
-      const choices = el(area, 'div', 'li-property-choices');
+      const choices = el(area, 'div', 'li-issue-options');
       const render = () => {
         chips.replaceChildren();
         for (const id of chosen) {
@@ -667,13 +669,11 @@ export class IssuesView extends ItemView {
           const chip = action(chips, dependency ? `#${dependency.number} ${dependency.title}` : id, () => { chosen.delete(id); render(); }, 'li-subtle li-dependency-chip');
           chip.setAttribute('aria-label', `移除依赖 ${dependency?.title || id}`);
         }
-        choices.replaceChildren();
-        const query = search.value.replace(/^[@/]/, '').trim().toLowerCase();
-        const candidates = this.data.issues.filter(i => i.id !== issue.id && !chosen.has(i.id) && `${this.data.projects.find(p => p.id === i.projectId)?.title} #${i.number} ${i.title}`.toLowerCase().includes(query)).slice(0, 20);
-        for (const candidate of candidates) action(choices, `${this.data.projects.find(p => p.id === candidate.projectId)?.title} #${candidate.number} ${candidate.title}`, () => { chosen.add(candidate.id); render(); }, 'li-subtle');
-        if (!candidates.length) el(choices, 'span', 'li-muted', '没有匹配的议题');
+        this.issueChoices(choices, issue.projectId, issue.number, search.value, new Set([issue.id, ...chosen]), candidate => {
+          chosen.add(candidate.id); render(); area.dispatchEvent(new area.ownerDocument.defaultView!.Event('change', { bubbles: true }));
+        });
       };
-      search.addEventListener('input', render); render();
+      search.addEventListener('input', render); this.issueSearchKeys(search, choices); render();
       return () => ({ dependencies: [...chosen] });
     });
     if (issue.dependencies.length) {
@@ -684,6 +684,64 @@ export class IssuesView extends ItemView {
         else el(links, 'span', 'li-muted', id);
       }
     }
+  }
+  private issueChoices(container: HTMLElement, projectId: string, number: number, query: string, excluded: Set<string>, pick: (issue: Issue) => void, selected = '') {
+    const foreignOpen = container.querySelector<HTMLDetailsElement>('.li-other-projects')?.open || false;
+    container.replaceChildren();
+    const candidates = issueOptions(this.data.issues, this.data.projects, projectId, number, query, excluded);
+    const own = candidates.filter(issue => issue.projectId === projectId), other = candidates.filter(issue => issue.projectId !== projectId);
+    const add = (list: HTMLElement, issue: Issue, foreign = false) => {
+      const project = this.data.projects.find(project => project.id === issue.projectId);
+      const option = action(list, '', () => pick(issue), 'li-dependency-option li-issue-option');
+      option.dataset.issueId = issue.id; option.setAttribute('aria-description', STATUS_NAMES[issue.status]); option.setAttribute('aria-label', `${project?.title || ''} #${issue.number} ${issue.title}`);
+      option.setAttribute('aria-pressed', String(issue.id === selected));
+      pill(option, issue.status, issue.closeReason);
+      const body = el(option, 'span', 'li-issue-option-body'); el(body, 'span', 'li-issue-option-title', `#${issue.number} ${issue.title}`);
+      if (foreign) el(body, 'span', 'li-muted li-issue-option-project', project?.title || '');
+    };
+    if (own.length) {
+      el(container, 'div', 'li-issue-options-label li-muted', `当前项目 · ${own.length}`);
+      const list = el(container, 'div', 'li-issue-options-list'); for (const issue of own) add(list, issue);
+    } else el(container, 'p', 'li-issue-options-empty li-muted', query.trim() ? '当前项目没有匹配的议题' : '当前项目没有可选议题');
+    if (other.length) {
+      const group = el(container, 'details', 'li-other-projects'); el(group, 'summary', '', `其他项目 · ${other.length}${query.trim() ? ' 条匹配' : ''}`);
+      const list = el(group, 'div', 'li-issue-options-list');
+      const populate = () => { if (group.open && !list.childElementCount) for (const issue of other) add(list, issue, true); };
+      group.addEventListener('toggle', populate); group.open = foreignOpen; populate();
+    }
+  }
+  private parentInput(parent: HTMLElement, projectId: string, issue: Issue | undefined, value: string) {
+    const field = el(parent, 'input'); field.type = 'hidden'; field.value = value; field.setAttribute('aria-label', '父议题');
+    const label = () => { const chosen = this.data.issues.find(issue => issue.id === field.value); return chosen ? `#${chosen.number} ${chosen.title}` : field.value || '无父议题'; };
+    const button = action(parent, label(), () => {
+      this.relationPicker?.close();
+      const modal = this.relationPicker = this.modal('选择父议题'); modal.modalEl.addClass('li-issue-picker-modal');
+      modal.onClose = () => { if (this.relationPicker === modal) this.relationPicker = undefined; };
+      const search = input(modal.contentEl, '搜索标题、编号或项目'); search.type = 'search'; search.enterKeyHint = 'search'; search.setAttribute('aria-label', '搜索父议题');
+      const choose = (id: string) => { field.value = id; field.dispatchEvent(new field.ownerDocument.defaultView!.Event('change', { bubbles: true })); modal.close(); button.focus(); };
+      action(modal.contentEl, '无父议题', () => choose(''), 'li-subtle li-issue-picker-clear');
+      const choices = el(modal.contentEl, 'div', 'li-issue-options');
+      const number = issue?.number ?? Math.max(0, ...this.data.issues.filter(issue => issue.projectId === projectId).map(issue => issue.number)) + 1;
+      const render = () => this.issueChoices(choices, projectId, number, search.value, new Set(issue ? [issue.id] : []), candidate => choose(candidate.id), field.value);
+      search.addEventListener('input', render);
+      this.issueSearchKeys(search, choices);
+      action(el(modal.modalEl, 'div', 'li-modal-actions'), '取消', () => modal.close());
+      render(); modal.open(); search.focus();
+    }, 'li-parent-picker');
+    button.setAttribute('aria-label', '选择父议题'); button.setAttribute('aria-haspopup', 'dialog');
+    button.setAttribute('aria-description', label());
+    field.addEventListener('change', () => { button.textContent = label(); button.setAttribute('aria-description', label()); });
+    return field;
+  }
+  private issueSearchKeys(search: HTMLInputElement, choices: HTMLElement) {
+    search.addEventListener('keydown', event => {
+      if (event.isComposing || event.key !== 'Enter' && event.key !== 'ArrowDown') return;
+      event.preventDefault(); event.stopPropagation();
+      const first = [...choices.querySelectorAll<HTMLButtonElement>('.li-issue-options-list > button')].find(button => {
+        const group = button.closest<HTMLDetailsElement>('.li-other-projects'); return !group || group.open;
+      });
+      if (event.key === 'Enter') first?.click(); else first?.focus();
+    });
   }
   private listInput(parent: HTMLElement, placeholder: string, values: string[], options: string[]) {
     const field = input(parent, placeholder, values.join(', '));
@@ -725,8 +783,8 @@ export class IssuesView extends ItemView {
         finally { save.disabled = false; }
       }), 'mod-cta');
       this.startEditing(area, `议题属性 · ${name}`, () => JSON.stringify(read()) !== initial, () => { area.remove(); display.hidden = false; });
-      area.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); this.stopEditing(true); change.focus(); } else if (event.key === 'Enter' && event.target instanceof HTMLInputElement) { event.preventDefault(); save.click(); } });
-      area.querySelector<HTMLElement>('input,select')?.focus();
+      area.addEventListener('keydown', event => { if (event.isComposing) return; if (event.key === 'Escape') { event.preventDefault(); this.stopEditing(true); change.focus(); } else if (event.key === 'Enter' && event.target instanceof HTMLInputElement) { event.preventDefault(); save.click(); } });
+      (area.querySelector<HTMLElement>('input:not([type="hidden"]),select') || area.querySelector<HTMLElement>('.li-parent-picker'))?.focus();
     })), 'li-subtle li-property-value');
     change.setAttribute('aria-label', `修改${name}`);
     return field;
@@ -853,19 +911,19 @@ export class IssuesView extends ItemView {
     el(propertiesSummary, 'span', 'li-property-summary', overview.join(' · ') || '状态、标签、里程碑、依赖');
     const grid = el(properties, 'div', 'li-form-grid'); let currentState = stateValue({ status: issue?.status || defaults.status || 'open', closeReason: issue?.closeReason || defaults.closeReason }); select(this.field(grid, '状态'), stateOptions, currentState, value => { currentState = value; });
     const labels = input(this.field(grid, '标签'), '多个标签用逗号分隔', (issue?.labels || defaults.labels || []).join(', ')); const milestone = input(this.field(grid, '里程碑'), '例如：首次发布', issue?.milestone || defaults.milestone || ''); const assignees = input(this.field(grid, '负责人'), '姓名，用逗号分隔', (issue?.assignees || defaults.assignees || []).join(', ')); const due = input(this.field(grid, '截止日期'), '', issue?.dueDate || defaults.dueDate || ''); due.type = 'date';
-    let parent = issue?.parent || defaults.parent || ''; select(this.field(grid, '父议题'), [['', '无'], ...this.data.issues.filter(i => i.id !== issue?.id).map(i => [i.id, `${this.data.projects.find(p => p.id === i.projectId)?.title || ''} #${i.number} ${i.title}`] as [string, string])], parent, value => { parent = value; });
+    const parent = this.parentInput(this.field(grid, '父议题'), project.id, issue, issue?.parent || defaults.parent || '');
     const dependencies = new Set(issue?.dependencies || defaults.dependencies || []);
     const depField = this.field(properties, '依赖'); const selectedDeps = el(depField, 'div', 'li-selected-dependencies');
-    const searchDeps = input(depField, '输入 @ 或 / 搜索议题'); searchDeps.setAttribute('aria-label', '搜索依赖议题');
+    const searchDeps = input(depField, '搜索标题、编号或项目'); searchDeps.setAttribute('aria-label', '搜索依赖议题');
     const suggestions = el(depField, 'div', 'li-dependency-suggestions'); suggestions.hidden = true;
     const renderSelected = () => { selectedDeps.replaceChildren(); for (const id of dependencies) { const candidate = this.data.issues.find(i => i.id === id); const chip = el(selectedDeps, 'span', 'li-dependency-chip'); el(chip, 'span', '', candidate ? `#${candidate.number} ${candidate.title}` : id); const remove = action(chip, '', () => { dependencies.delete(id); renderSelected(); renderSuggestions(); form.dispatchEvent(new form.ownerDocument.defaultView!.Event('change')); }, 'li-icon-button', 'x'); remove.setAttribute('aria-label', `移除依赖 ${candidate?.title || id}`); remove.title = `移除依赖 ${candidate?.title || id}`; } };
-    const renderSuggestions = () => { const match = searchDeps.value.match(/^[@/](.*)$/); suggestions.replaceChildren(); suggestions.hidden = !match; if (!match) return; const query = match[1].trim().toLowerCase(); const candidates = this.data.issues.filter(i => i.id !== issue?.id && !dependencies.has(i.id) && `${this.data.projects.find(p => p.id === i.projectId)?.title || ''} #${i.number} ${i.title}`.toLowerCase().includes(query)).slice(0, 20); for (const candidate of candidates) { const name = this.data.projects.find(p => p.id === candidate.projectId)?.title || ''; action(suggestions, `${name} #${candidate.number} ${candidate.title}`, () => { dependencies.add(candidate.id); searchDeps.value = ''; renderSelected(); renderSuggestions(); form.dispatchEvent(new form.ownerDocument.defaultView!.Event('change')); searchDeps.focus(); }, 'li-dependency-option'); } if (!candidates.length) el(suggestions, 'div', 'li-muted', '没有匹配的议题'); };
-    searchDeps.addEventListener('input', renderSuggestions); searchDeps.addEventListener('keydown', event => { if (event.key === 'Escape') { suggestions.hidden = true; } else if (event.key === 'Enter' && !suggestions.hidden) { event.preventDefault(); suggestions.querySelector('button')?.click(); } }); renderSelected();
+    const renderSuggestions = () => { suggestions.hidden = false; suggestions.addClass('li-issue-options'); this.issueChoices(suggestions, project.id, issue?.number ?? Math.max(0, ...this.data.issues.filter(issue => issue.projectId === project.id).map(issue => issue.number)) + 1, searchDeps.value, new Set([...(issue ? [issue.id] : []), ...dependencies]), candidate => { dependencies.add(candidate.id); searchDeps.value = ''; renderSelected(); renderSuggestions(); form.dispatchEvent(new form.ownerDocument.defaultView!.Event('change')); searchDeps.focus(); }); };
+    searchDeps.addEventListener('input', renderSuggestions); searchDeps.addEventListener('focus', renderSuggestions); this.issueSearchKeys(searchDeps, suggestions); searchDeps.addEventListener('keydown', event => { if (!event.isComposing && event.key === 'Escape') suggestions.hidden = true; }); renderSelected();
     const draft = this.cacheForm(form, issue ? `issue-properties:${issue.id}` : `new-issue:${project.id}:${defaults.parent || ''}`, issue?.revision ?? issue?.updatedAt, {
-      read: () => [...dependencies], restore: value => { if (Array.isArray(value) && value.every(v => typeof v === 'string')) { dependencies.clear(); value.forEach(v => dependencies.add(v)); renderSelected(); } },
+      read: () => [...dependencies], restore: value => { if (Array.isArray(value) && value.every(v => typeof v === 'string')) { dependencies.clear(); value.forEach(v => dependencies.add(v)); renderSelected(); renderSuggestions(); } },
     });
-    const saveIssue = async () => { if (!issue && !title?.value.trim()) throw new Error('请输入 Issue 标题'); if (form.querySelector('[data-uploading]')) throw new Error('附件正在保存，请稍后保存'); const submitted = draft.snapshot(); const patch: IssuePatch = { ...(!issue ? { title: title!.value.trim(), body: body!.value } : {}), ...statePatch(currentState), labels: words(labels.value), milestone: milestone.value.trim(), assignees: words(assignees.value), dueDate: due.value, parent, dependencies: [...dependencies], actor: this.host.author }; const saved = issue ? await this.host.store.updateIssue(issue.id, patch, draft.revision) : await this.host.store.createIssue(project.id, { ...patch, author: this.host.author, title: title!.value.trim() }); draft.complete(submitted); modal?.close(); this.creating = undefined; this.stopEditing(); await this.navigate(project.id, saved.id); };
-    const formValue = () => JSON.stringify({ fields: [...form.querySelectorAll('input,select')].map(field => (field as HTMLInputElement).value), body: body?.value, currentState, parent, dependencies: [...dependencies] });
+    const saveIssue = async () => { if (!issue && !title?.value.trim()) throw new Error('请输入 Issue 标题'); if (form.querySelector('[data-uploading]')) throw new Error('附件正在保存，请稍后保存'); const submitted = draft.snapshot(); const patch: IssuePatch = { ...(!issue ? { title: title!.value.trim(), body: body!.value } : {}), ...statePatch(currentState), labels: words(labels.value), milestone: milestone.value.trim(), assignees: words(assignees.value), dueDate: due.value, parent: parent.value, dependencies: [...dependencies], actor: this.host.author }; const saved = issue ? await this.host.store.updateIssue(issue.id, patch, draft.revision) : await this.host.store.createIssue(project.id, { ...patch, author: this.host.author, title: title!.value.trim() }); draft.complete(submitted); modal?.close(); this.creating = undefined; this.stopEditing(); await this.navigate(project.id, saved.id); };
+    const formValue = () => JSON.stringify({ fields: [...form.querySelectorAll('input,select')].map(field => (field as HTMLInputElement).value), body: body?.value, currentState, parent: parent.value, dependencies: [...dependencies] });
     const initialForm = formValue();
     if (inline) this.startEditing(frame || inline, issue ? '议题属性' : '新建议题', () => formValue() !== initialForm || !!body?.uploading, () => { body?.destroy(); this.creating = undefined; restore?.(); });
     if (frame) { const buttons = el(frame, 'div', 'li-inline-actions'); action(buttons, '取消', () => { this.stopEditing(true); safe(() => this.navigate(project.id)); }); const save = action(buttons, '创建议题', () => safe(async () => { save.disabled = true; try { await saveIssue(); } finally { save.disabled = false; } }), 'mod-cta'); }
