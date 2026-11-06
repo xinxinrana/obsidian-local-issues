@@ -57,6 +57,17 @@ test('bundled plugin registers native entry points; Vault adapter, protocol, API
   plugin = new module.exports.default(app, { id: 'local-issues', dir: '.obsidian/plugins/local-issues' });
   try {
     await plugin.onload();
+    const saveData = plugin.saveData.bind(plugin); let failLayoutSave = true;
+    plugin.saveData = async (data: any) => { if (failLayoutSave) { failLayoutSave = false; throw new Error('设置写入失败'); } await saveData(data); };
+    const failedLayout = plugin.saveLayout({ sidebarWidth: 320 });
+    const queuedLayout = plugin.saveLayout({ projectSort: 'manual', projectOrder: ['remembered'] });
+    await assert.rejects(failedLayout, /设置写入失败/); await queuedLayout;
+    assert.equal(app.savedData.layout.sidebarWidth, undefined, '失败的偏好写入不能混入下一次保存');
+    assert.deepEqual([...app.savedData.layout.projectOrder], ['remembered']);
+    await Promise.all([plugin.saveLayout({ sidebarWidth: 300 }), plugin.saveLayout({ projectSort: 'updated' })]);
+    assert.equal(app.savedData.layout.sidebarWidth, 300); assert.equal(app.savedData.layout.projectSort, 'updated');
+    assert.equal(app.savedData.port, 0, '布局偏好不能覆盖原有插件设置');
+    plugin.saveData = saveData;
     assert.ok(plugin.views.has('local-issues-view'));
     assert.ok(plugin.protocols.has('local-issues'));
     assert.ok(plugin.commands.some((c: any) => c.id === 'open-projects'));

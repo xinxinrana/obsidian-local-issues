@@ -11,6 +11,7 @@ import type { startApi } from './api';
 import { IssuesView, VIEW_TYPE, type ViewHost } from './view';
 import { suppressTooltips } from './tooltips';
 import type { VaultAdapter } from './types';
+import { layoutPreferences, type LayoutPreferences } from './layout-preferences';
 
 interface Settings {
   root: string;
@@ -22,6 +23,7 @@ interface Settings {
   shares: Record<string, { ref: string }>;
   cliNodePath?: string;
   draftStorageId?: string;
+  layout?: LayoutPreferences;
 }
 const DEFAULTS: Settings = { root: 'Local Issues', author: '我', apiEnabled: false, port: 27183, shares: {} };
 
@@ -44,7 +46,17 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
   private cliStatusVersion = 0;
   private cliListeners = new Set<() => void>();
   private desktop?: Promise<typeof import('./desktop')>;
+  private layoutSave: Promise<void> = Promise.resolve();
   get author(): string { return this.settings.author; }
+  get layout(): LayoutPreferences { return this.settings.layout || {}; }
+  async saveLayout(patch: Partial<LayoutPreferences>): Promise<void> {
+    this.layoutSave = this.layoutSave.catch(() => {}).then(async () => {
+      const previous = this.settings.layout;
+      this.settings.layout = { ...this.layout, ...patch };
+      try { await this.saveSettings(); } catch (error) { this.settings.layout = previous; throw error; }
+    });
+    await this.layoutSave;
+  }
   get desktopAvailable(): boolean { return !Platform.isMobile; }
   private desktopServices() {
     if (!this.desktopAvailable) throw new Error('此功能仅在桌面端提供。');
@@ -54,6 +66,7 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
   async onload(): Promise<void> {
     const saved = await this.loadData();
     this.settings = { ...DEFAULTS, ...(saved ?? {}), shares: saved?.shares ?? {} };
+    this.settings.layout = layoutPreferences((saved as Partial<Settings> | null)?.layout);
     delete (this.settings as unknown as Record<string, unknown>).token;
     delete (this.settings as unknown as Record<string, unknown>).apiToken;
     this.settings.shares = Object.fromEntries(Object.entries(this.settings.shares).map(([id, entry]) => [id, { ref: entry.ref }]));

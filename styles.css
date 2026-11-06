@@ -65,7 +65,7 @@ body:has(.li-no-tooltips:hover) .tooltip,
 .local-issues .li-issues-table td:nth-child(2) { min-width: 220px; }
 .local-issues :is(button.li-project-title,button.li-issue-title) { padding: 0; height: auto; min-width: 0; max-width: 100%; overflow-wrap: anywhere; color: var(--text-normal); font-weight: 600; white-space: normal; text-align: start; font-size: var(--font-ui-medium); }
 .local-issues .li-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 360px; margin-top: 3px; }
-.local-issues .li-projects td:nth-child(2) { white-space: nowrap; }
+.local-issues .li-projects td:nth-child(3) { white-space: nowrap; }
 .local-issues .li-projects progress { width: 72px; height: 5px; appearance: none; border: 0; border-radius: 4px; accent-color: var(--interactive-accent); vertical-align: middle; }
 .local-issues .li-projects progress::-webkit-progress-bar { background: var(--background-modifier-border); border-radius: 4px; }
 .local-issues .li-projects progress::-webkit-progress-value { background: var(--interactive-accent); border-radius: 4px; }
@@ -98,9 +98,9 @@ body:has(.li-no-tooltips:hover) .tooltip,
 .local-issues .li-detail-title h1 { overflow-wrap: anywhere; }
 .local-issues .li-issue-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 12px 0 16px; border-bottom: 1px solid var(--li-border); }
 .local-issues .li-issue-summary .li-status { border: 1px solid currentColor; border-radius: 20px; padding: 2px 10px; }
-.local-issues .li-detail { display: grid; grid-template-columns: minmax(0,1fr) minmax(160px, 190px); gap: 24px; margin-top: 20px; }
+.local-issues .li-detail { display: grid; grid-template-columns: minmax(0,1fr) 12px minmax(180px, min(var(--li-sidebar-width, 240px), 40%)); gap: 12px; margin-top: 20px; }
 .local-issues .li-detail-main { min-width: 0; }
-.local-issues .li-sidebar { min-width: 0; border-inline-start: 1px solid var(--li-border); padding-inline-start: 20px; }
+.local-issues .li-sidebar { min-width: 0; padding-inline-start: 4px; }
 .local-issues .li-sidebar > h3 { margin-bottom: 14px; }
 .local-issues .li-sidebar .li-subtle { white-space: normal; height: auto; text-align: start; }
 .local-issues .li-property-display { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
@@ -199,10 +199,11 @@ body:has(.li-no-tooltips:hover) .tooltip,
   .local-issues .li-topbar { margin-top: -16px; }
   .local-issues .li-heading { align-items: flex-start; }
   .local-issues .li-board { grid-template-columns: repeat(2,250px); }
-  .local-issues .li-detail { grid-template-columns: minmax(0,1fr) 175px; gap: 18px; }
-  .local-issues .li-sidebar { padding-inline-start: 14px; }
+  .local-issues .li-detail { grid-template-columns: minmax(0,1fr) 12px minmax(180px, min(var(--li-sidebar-width, 240px), 40%)); gap: 8px; }
+  .local-issues .li-sidebar { padding-inline-start: 4px; }
 }
 @container local-issues (max-width: 700px) {
+  .local-issues .li-detail-resizer { display: none; }
   .local-issues .li-detail { grid-template-columns: minmax(0,1fr); }
   .local-issues .li-sidebar { order: -1; display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: baseline; border: 0; border-bottom: 1px solid var(--li-border); padding: 0 0 12px; }
   .local-issues .li-sidebar > h3 { width: 100%; margin: 0; }
@@ -401,3 +402,18 @@ body:has(.li-no-tooltips:hover) .tooltip,
   body:not(.is-mobile) .local-issues .li-dependency-option:hover { background: var(--background-modifier-hover); }
   body:not(.is-mobile) .local-issues button.li-state-tab:hover { color: var(--text-normal); }
 }
+
+.local-issues .li-detail-resizer { position: relative; align-self: stretch; min-height: 80px; cursor: col-resize; touch-action: none; border-radius: 4px; }
+.local-issues .li-detail-resizer::before { content: ""; position: absolute; inset-block: 0; left: 5px; width: 1px; background: var(--li-border); }
+.local-issues .li-detail-resizer::after { content: ""; position: absolute; top: 32px; left: 4px; width: 3px; height: 24px; border-radius: 3px; background: var(--li-border); }
+.local-issues .li-detail-resizer:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: 2px; }
+.local-issues .li-detail.is-resizing { cursor: col-resize; user-select: none; }
+.local-issues .li-detail.is-resizing > .li-detail-resizer::before, .local-issues .li-detail-resizer:focus-visible::before { background: var(--interactive-accent); }
+.local-issues .li-projects :is(th,td):first-child { width: 36px; min-width: 36px; padding-inline: 4px; }
+.local-issues .li-projects td:nth-child(2) { min-width: 180px; }
+.local-issues button.li-project-drag-handle { display: inline-flex; align-items: center; justify-content: center; width: 28px; min-width: 28px; height: 32px; padding: 4px; cursor: grab; touch-action: none; color: var(--text-muted); }
+.local-issues .is-reordering { opacity: .5; user-select: none; }
+.local-issues .is-reordering .li-project-drag-handle { cursor: grabbing; }
+.local-issues .li-drop-before { box-shadow: inset 0 2px var(--interactive-accent); }
+.local-issues .li-drop-after { box-shadow: inset 0 -2px var(--interactive-accent); }
+.is-mobile .local-issues button.li-project-drag-handle { width: 44px; min-width: 44px; height: 44px; flex: 0 0 44px; }
