@@ -122,6 +122,31 @@ try {
   await page.evaluate(() => fixture.close());
   console.log('WebKit 手机布局通过：402×874、874×402、375×812，固定导航、内容滚动、专注编辑、键盘高度与触控区域。预览：' + output);
   await context.close();
+  // Force real hover on the mobile UI, including tablets with an attached mouse.
+  const hoverContext = await browser.newContext({ viewport: { width: 402, height: 874 } });
+  const hoverPage = await hoverContext.newPage(); activePage = hoverPage;
+  await hoverPage.setContent(`<style>${theme}\n${css}</style><body></body>`);
+  await hoverPage.addScriptTag({ content: bundle.outputFiles[0].text });
+  await hoverPage.evaluate(async () => { window.fixture = await MobileFixture.createMobileFixture(); window.sample = await fixture.seed(); });
+  const projectTitle = hoverPage.locator('.li-project-title').first();
+  const normalTitle = await projectTitle.evaluate(el => getComputedStyle(el).color);
+  await projectTitle.hover();
+  assert.equal(await projectTitle.evaluate(el => getComputedStyle(el).color), normalTitle, '手机项目标题不继承桌面悬停变色');
+  await hoverPage.evaluate(() => fixture.view.navigate(sample.project.id));
+  const issueRow = hoverPage.locator('.li-issue-row').first(), issueTitle = issueRow.locator('.li-issue-title');
+  await hoverPage.mouse.move(0, 0);
+  const normalRow = await issueRow.evaluate(el => ({ background: getComputedStyle(el).backgroundColor, color: getComputedStyle(el.querySelector('.li-issue-title')).color }));
+  await issueTitle.hover();
+  assert.equal(await issueTitle.evaluate(el => getComputedStyle(el).color), normalRow.color, '手机议题标题不使用 hover 变色');
+  assert.equal(await issueRow.evaluate(el => getComputedStyle(el).backgroundColor), normalRow.background, '手机议题不残留 hover 底色');
+  await hoverPage.evaluate(async () => { fixture.mock.Platform.isMobile = false; document.body.classList.remove('is-mobile'); await fixture.view.refresh(); });
+  const desktopTitle = hoverPage.locator('.li-issue-title').first();
+  await hoverPage.mouse.move(0, 0);
+  await desktopTitle.hover();
+  await hoverPage.waitForFunction(() => getComputedStyle(document.querySelector('.li-issue-title')).color === 'rgb(129, 84, 198)', null, { timeout: 3000 });
+  assert.equal(await desktopTitle.evaluate(el => getComputedStyle(el).color), 'rgb(129, 84, 198)', '桌面鼠标仍有标题悬停反馈');
+  await hoverPage.evaluate(() => fixture.close()); await hoverContext.close();
+  console.log('WebKit hover 检查通过：移动端标题、议题底色保持稳定，桌面鼠标悬停反馈保留。');
 } catch (error) {
   if (activePage) { await activePage.screenshot({ path: join(output, 'failure.png') }); console.error(await activePage.evaluate(() => ({ state: fixture.view.getState(), notices: fixture.mock.notices, text: document.body.textContent?.slice(-1400) }))); }
   console.error('预览：' + output); throw error;

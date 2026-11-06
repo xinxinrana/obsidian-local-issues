@@ -30,7 +30,6 @@ body:has(.li-no-tooltips:hover) .tooltip,
 .local-issues :is(button.li-subtle,button.li-breadcrumb,button.li-more,button.li-project-title,button.li-issue-title,button.li-tab) {
   background: transparent; box-shadow: none; border: 0; color: var(--text-muted);
 }
-.local-issues :is(button.li-subtle,button.li-breadcrumb,button.li-more):hover { background: var(--background-modifier-hover); color: var(--text-normal); }
 .local-issues .li-topbar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: -20px 0 18px; padding-block: 12px; min-width: 0; position: sticky; top: 0; z-index: 10; background: var(--background-primary); border-bottom: 1px solid var(--li-border); }
 .local-issues .li-topbar button { height: 26px; padding: 2px 6px; font-size: var(--font-ui-small); }
 .local-issues .li-topbar .li-breadcrumb { overflow: hidden; text-overflow: ellipsis; max-width: 55%; }
@@ -41,14 +40,12 @@ body:has(.li-no-tooltips:hover) .tooltip,
 .local-issues .li-shell > .li-markdown { min-height: 0; padding: 0; margin: 8px 0 16px; color: var(--text-muted); }
 .local-issues .li-tabs { display: flex; gap: 22px; align-items: center; border-bottom: 1px solid var(--li-border); margin: 16px 0 14px; }
 .local-issues button.li-tab { height: 38px; padding: 6px 2px; border-radius: 0; border-bottom: 2px solid transparent; font-size: var(--font-ui-small); }
-.local-issues button.li-tab:hover { color: var(--text-normal); }
 .local-issues button.li-tab.is-active { color: var(--text-normal); border-bottom-color: var(--interactive-accent); font-weight: 600; }
 .local-issues .li-search-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 16px 0 8px; min-width: 0; }
 .local-issues .li-search-row input[type="text"] { flex: 1 1 260px; width: auto; min-width: 100px; height: 32px; }
 .local-issues .li-search-row select { flex: 0 0 auto; max-width: 150px; height: 30px; font-size: var(--font-ui-small); }
 .local-issues .li-toolbar { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; padding: 0 0 12px; border-bottom: 1px solid var(--li-border); margin-bottom: 14px; }
 .local-issues .li-toolbar :is(select,button) { height: 28px; max-width: 170px; font-size: var(--font-ui-small); background-color: transparent; box-shadow: none; color: var(--text-muted); }
-.local-issues .li-toolbar button:hover, .local-issues .li-toolbar select:hover { background-color: var(--background-modifier-hover); color: var(--text-normal); }
 .local-issues .li-advanced-filters { margin: 0 0 10px; font-size: var(--font-ui-small); }
 .local-issues .li-advanced-filters > summary { cursor: pointer; color: var(--text-muted); width: fit-content; padding: 4px 0; }
 .local-issues .li-filter-grid { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
@@ -62,13 +59,11 @@ body:has(.li-no-tooltips:hover) .tooltip,
 .local-issues .li-table :is(th,td) { padding: 12px 10px; text-align: start; border: 0; border-bottom: 1px solid var(--li-border); vertical-align: middle; }
 .local-issues .li-table th { font-size: var(--font-ui-small); font-weight: 500; color: var(--text-muted); white-space: nowrap; }
 .local-issues .li-table td { font-size: var(--font-ui-small); }
-.local-issues .li-table tbody tr:not(.li-group):hover { background: var(--background-modifier-hover); }
 .local-issues .li-table td:first-child { min-width: 180px; }
 .local-issues .li-table td:last-child { text-align: end; }
 .local-issues .li-issues-table :is(td,th):first-child { width: 30px; min-width: 30px; }
 .local-issues .li-issues-table td:nth-child(2) { min-width: 220px; }
 .local-issues :is(button.li-project-title,button.li-issue-title) { padding: 0; height: auto; min-width: 0; max-width: 100%; overflow-wrap: anywhere; color: var(--text-normal); font-weight: 600; white-space: normal; text-align: start; font-size: var(--font-ui-medium); }
-.local-issues :is(button.li-project-title,button.li-issue-title):hover { color: var(--interactive-accent); }
 .local-issues .li-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 360px; margin-top: 3px; }
 .local-issues .li-projects td:nth-child(2) { white-space: nowrap; }
 .local-issues .li-projects progress { width: 72px; height: 5px; appearance: none; border: 0; border-radius: 4px; accent-color: var(--interactive-accent); vertical-align: middle; }
@@ -84,7 +79,6 @@ body:has(.li-no-tooltips:hover) .tooltip,
 .local-issues .li-issue-list { border: 1px solid var(--li-border); border-radius: var(--radius-m); overflow: hidden; }
 .local-issues .li-issue-row { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--li-border); }
 .local-issues .li-issue-row:last-child { border-bottom: 0; }
-.local-issues .li-issue-row:hover { background: var(--background-modifier-hover); }
 .local-issues .li-issue-row input[type="checkbox"] { margin-top: 4px; }
 .local-issues .li-issue-content { flex: 1 1 auto; min-width: 0; }
 .local-issues .li-issue-title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
@@ -98,7 +92,6 @@ body:has(.li-no-tooltips:hover) .tooltip,
 .local-issues .li-board-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
 .local-issues .li-card { padding: 12px; background: var(--background-primary); border: 1px solid var(--li-border); border-radius: var(--radius-m); margin-bottom: 10px; }
 .local-issues .li-card[draggable="true"] { cursor: grab; }
-.local-issues .li-card:hover { border-color: var(--interactive-accent); }
 .local-issues .li-card select { height: 26px; font-size: var(--font-ui-small); margin-top: 8px; }
 .local-issues .li-detail-header { align-items: flex-start; }
 .local-issues .li-detail-title { display: flex; align-items: baseline; flex-wrap: wrap; flex: 1 1 320px; gap: 8px; min-width: 0; }
@@ -145,7 +138,6 @@ body:has(.li-no-tooltips:hover) .tooltip,
 .local-issues .li-editor-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; padding: 8px 12px 0; }
 .local-issues .li-editor-toolbar button { height: 26px; padding: 2px 8px; border: 0; border-radius: var(--radius-s); box-shadow: none; background: transparent; color: var(--text-muted); font-size: var(--font-ui-small); }
 .local-issues .li-editor-toolbar button.is-active { color: var(--text-normal); font-weight: 600; }
-.local-issues .li-editor-toolbar button:hover { background: var(--background-modifier-hover); }
 .local-issues .li-live-editor[hidden] { display: none; }
 .local-issues .li-live-editor, .local-issues .li-live-editor .cm-editor { min-width: 0; width: 100%; max-width: 100%; }
 .local-issues .li-live-editor .cm-editor { background: transparent; }
@@ -228,7 +220,6 @@ body:has(.li-no-tooltips:hover) .tooltip,
 .local-issues .li-dependency-chip button { height: 22px; padding: 0 4px; background: transparent; box-shadow: none; }
 .local-issues .li-dependency-suggestions { display: flex; flex-direction: column; gap: 2px; max-height: 180px; overflow-y: auto; padding: 4px; border: 1px solid var(--li-border); border-radius: var(--radius-s); background: var(--background-primary); }
 .local-issues .li-dependency-option { height: auto; min-height: 30px; text-align: start; white-space: normal; background: transparent; box-shadow: none; }
-.local-issues .li-dependency-option:hover { background: var(--background-modifier-hover); }
 
 .local-issues .li-reason-on-hold { color: var(--color-orange); }
 .local-issues .li-reason-not-planned { color: var(--text-muted); }
@@ -246,7 +237,7 @@ body:has(.li-no-tooltips:hover) .tooltip,
 
 .local-issues .li-state-tabs { display: flex; align-items: center; gap: 20px; padding: 2px 4px 10px; }
 .local-issues button.li-state-tab { height: 28px; padding: 2px 0; color: var(--text-muted); background: transparent; box-shadow: none; font-size: var(--font-ui-small); }
-.local-issues button.li-state-tab:hover, .local-issues button.li-state-tab.is-active { color: var(--text-normal); }
+.local-issues button.li-state-tab.is-active { color: var(--text-normal); }
 .local-issues button.li-state-tab.is-active { font-weight: 600; }
 
 .local-issues .li-create-hint { margin: 0 0 20px; }
@@ -376,3 +367,17 @@ body:has(.li-no-tooltips:hover) .tooltip,
 .local-issues .li-field > .li-select-control { width: 100%; }
 .local-issues .li-field > label.li-with-icon { display: flex; align-items: center; gap: 6px; }
 .is-mobile .local-issues .li-editor-tabs { flex-wrap: nowrap; width: auto; }
+
+/* Touch devices can retain :hover after tapping; only mouse interfaces use it. */
+@media (hover: hover) and (pointer: fine) {
+  body:not(.is-mobile) .local-issues :is(button.li-subtle,button.li-breadcrumb,button.li-more):hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+  body:not(.is-mobile) .local-issues button.li-tab:hover { color: var(--text-normal); }
+  body:not(.is-mobile) .local-issues .li-toolbar button:hover, body:not(.is-mobile) .local-issues .li-toolbar select:hover { background-color: var(--background-modifier-hover); color: var(--text-normal); }
+  body:not(.is-mobile) .local-issues .li-table tbody tr:not(.li-group):hover { background: var(--background-modifier-hover); }
+  body:not(.is-mobile) .local-issues :is(button.li-project-title,button.li-issue-title):hover { color: var(--interactive-accent); }
+  body:not(.is-mobile) .local-issues .li-issue-row:hover { background: var(--background-modifier-hover); }
+  body:not(.is-mobile) .local-issues .li-card:hover { border-color: var(--interactive-accent); }
+  body:not(.is-mobile) .local-issues .li-editor-toolbar button:hover { background: var(--background-modifier-hover); }
+  body:not(.is-mobile) .local-issues .li-dependency-option:hover { background: var(--background-modifier-hover); }
+  body:not(.is-mobile) .local-issues button.li-state-tab:hover { color: var(--text-normal); }
+}
