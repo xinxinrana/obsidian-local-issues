@@ -17,4 +17,7 @@ test('layout preferences reject malformed values and constrain usable widths', (
   assert.deepEqual(layoutPreferences({ sidebarWidth: NaN, projectOrder: 'oops', projectSort: 'no' }), {});
   assert.deepEqual(layoutPreferences({ sidebarWidth: 999, projectOrder: ['a', 'a', null, 'b'], projectSort: 'manual' }), { sidebarWidth: 480, projectOrder: ['a', 'b'], projectSort: 'manual' });
   assert.equal(layoutPreferences({ sidebarWidth: 1 }).sidebarWidth, 180);
+  assert.deepEqual(layoutPreferences({ sidebarHidden: 'false' }), {});
+  assert.deepEqual(layoutPreferences({ sidebarHidden: true }), { sidebarHidden: true });
+  assert.deepEqual(layoutPreferences({ sidebarHidden: false }), { sidebarHidden: false });
 });

@@ -324,6 +324,22 @@ export class IssuesView extends ItemView {
     try { await this.host.saveLayout?.(patch); }
     catch (error) { this.layout = previous; throw error; }
   }
+  private sidebarVisibility(detail: HTMLElement, sidebar: HTMLElement, controls: HTMLElement) {
+    let hidden = !!this.layout.sidebarHidden;
+    const apply = () => {
+      detail.toggleClass('is-sidebar-hidden', hidden); sidebar.hidden = hidden;
+      toggle.replaceChildren(); toggle.appendText(hidden ? '显示属性' : '隐藏属性'); prependIcon(toggle, 'sidebar');
+      toggle.setAttribute('aria-expanded', String(!hidden));
+    };
+    const change = async () => {
+      toggle.disabled = true; hidden = !hidden; apply();
+      try { await this.writeLayout({ sidebarHidden: hidden }); }
+      catch (error) { hidden = !!this.layout.sidebarHidden; apply(); throw error; }
+      finally { toggle.disabled = false; }
+    };
+    const toggle = action(controls, '', () => safe(() => this.activeEdit && sidebar.contains(this.activeEdit.element) ? this.afterEditing(change) : change()), 'li-subtle li-sidebar-toggle');
+    apply();
+  }
   private sidebarResizer(detail: HTMLElement) {
     const handle = el(detail, 'div', 'li-detail-resizer'); handle.tabIndex = 0;
     handle.setAttribute('role', 'separator'); handle.setAttribute('aria-orientation', 'vertical'); handle.setAttribute('aria-label', '调整属性栏宽度');
@@ -693,7 +709,7 @@ export class IssuesView extends ItemView {
           safe(() => this.afterEditing(() => { this.mobilePropertiesOpen = false; properties.open = false; }));
         } else this.mobilePropertiesOpen = properties.open;
       });
-    } else sidebar = el(detail, 'aside', 'li-sidebar');
+    } else { sidebar = el(detail, 'aside', 'li-sidebar'); this.sidebarVisibility(detail, sidebar, controls); }
     const description = el(main, 'article', 'li-comment li-description'); const descriptionHead = el(description, 'div', 'li-comment-header'); el(descriptionHead, 'strong', '', issue.author); el(descriptionHead, 'span', 'li-muted', '描述'); el(descriptionHead, 'div', 'li-spacer');
     const content = el(description, 'div', 'li-description-content'); this.markdown(content, issue.body, issue.path);
     const edit = action(descriptionHead, '编辑', () => safe(() => this.afterEditing(() => {

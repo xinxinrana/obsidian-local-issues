@@ -1,11 +1,12 @@
 import type { Project } from './types';
 
-export interface LayoutPreferences { sidebarWidth?: number; projectOrder?: string[]; projectSort?: string; }
+export interface LayoutPreferences { sidebarWidth?: number; sidebarHidden?: boolean; projectOrder?: string[]; projectSort?: string; }
 
 export function layoutPreferences(value: unknown): LayoutPreferences {
   if (!value || typeof value !== 'object') return {};
   const stored = value as Record<string, unknown>;
   return {
+    ...(typeof stored.sidebarHidden === 'boolean' ? { sidebarHidden: stored.sidebarHidden } : {}),
     ...(typeof stored.sidebarWidth === 'number' && Number.isFinite(stored.sidebarWidth) ? { sidebarWidth: Math.max(180, Math.min(480, stored.sidebarWidth)) } : {}),
     ...(Array.isArray(stored.projectOrder) ? { projectOrder: [...new Set(stored.projectOrder.filter((id): id is string => typeof id === 'string'))] } : {}),
     ...(typeof stored.projectSort === 'string' && ['manual', 'updated', 'title', 'due'].includes(stored.projectSort) ? { projectSort: stored.projectSort } : {}),
