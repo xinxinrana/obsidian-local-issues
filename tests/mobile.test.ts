@@ -86,7 +86,12 @@ test('mobile bundle works without Node globals/modules and exposes only manual v
     await wait(() => !!f.view.contentEl.querySelector('.li-sidebar select'));
     const state = f.view.contentEl.querySelector('.li-sidebar select'); state.value = 'completed'; state.dispatchEvent(new w.Event('change', { bubbles: true }));
     await wait(async () => (await f.plugin.store.getIssue(issue.id)).status === 'closed');
-    f.plugin.openSettings(); assert.doesNotMatch(f.mock.modals.at(-1).contentEl.textContent, /Agent|CLI|API|端口|分享/); f.mock.modals.at(-1).close();
+    f.plugin.openSettings();
+    const mobileSettings = f.mock.modals.at(-1).contentEl;
+    assert.doesNotMatch(mobileSettings.textContent, /Agent|CLI|API|端口|分享/);
+    assert.deepEqual([...mobileSettings.querySelectorAll('.li-settings-tab')].map((tab: any) => tab.textContent), ['常规', '操作']);
+    assert.equal(mobileSettings.querySelectorAll('.li-settings-panel:not([hidden])').length, 1);
+    f.mock.modals.at(-1).close();
     assert.equal(listeners, 2); assert.deepEqual(requested, []);
     const otherProject = (await f.plugin.store.snapshot()).projects.find((p: any) => p.title === '日常记录');
     const externalParent = await f.plugin.store.createIssue(otherProject.id, { title: '跨项目父议题测试' });

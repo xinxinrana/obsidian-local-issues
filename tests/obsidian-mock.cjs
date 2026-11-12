@@ -86,9 +86,9 @@ class PluginSettingTab { constructor(app, plugin) { this.app = app; this.plugin 
 class TFile { constructor(path) { this.path = path; this.name = path.split('/').pop(); this.basename = this.name.replace(/\.[^.]+$/, ''); this.extension = this.name.split('.').pop(); } }
 class FileSystemAdapter {}
 class Setting {
-  constructor(el) { this.settingEl = el.createDiv({ cls: 'setting-item' }); this.info = this.settingEl.createDiv(); this.controls = this.settingEl.createDiv(); }
-  setName(text) { this.info.createDiv({ text }); return this; }
-  setDesc(text) { this.info.createDiv({ text }); return this; }
+  constructor(el) { this.settingEl = el.createDiv({ cls: 'setting-item' }); this.info = this.settingEl.createDiv({ cls: 'setting-item-info' }); this.controls = this.settingEl.createDiv({ cls: 'setting-item-control' }); }
+  setName(text) { this.info.createDiv({ cls: 'setting-item-name', text }); return this; }
+  setDesc(text) { this.info.createDiv({ cls: 'setting-item-description', text }); return this; }
   addText(cb) { cb(this.control('input')); return this; }
   addToggle(cb) { const c = this.control('input'); c.inputEl.type = 'checkbox'; cb(c); return this; }
   addButton(cb) { cb(this.control('button')); return this; }
