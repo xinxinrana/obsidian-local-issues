@@ -168,6 +168,11 @@ body:has(.li-no-tooltips:hover) .tooltip,
 .local-issues .li-upload-status:empty { display: none; }
 .local-issues .li-editor-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-inline-start: auto; }
 .local-issues .li-editor-actions:empty { display: none; }
+.local-issues .li-close-actions { display: inline-flex; align-items: stretch; }
+.local-issues .li-close-actions button { border-radius: 0; }
+.local-issues .li-close-actions .li-close-primary { border-start-start-radius: var(--radius-s); border-end-start-radius: var(--radius-s); }
+.local-issues .li-close-actions .li-close-toggle { min-width: 32px; padding-inline: 7px; border-start-end-radius: var(--radius-s); border-end-end-radius: var(--radius-s); border-inline-start: 1px solid var(--background-modifier-border); }
+.local-issues .li-close-toggle .li-icon { margin: 0; }
 .local-issues .li-description-content > .li-editor { border: 0; border-radius: 0; margin: 0; }
 .local-issues .li-comment:has(.li-editor:focus-within), .local-issues .li-comment:has(.li-editor.is-dragover) { border-color: var(--interactive-accent); }
 .local-issues .li-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; min-width: 0; }

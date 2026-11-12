@@ -1,12 +1,13 @@
 import { Compartment, EditorSelection, EditorState, Prec, Range } from '@codemirror/state';
 import { Decoration, DecorationSet, EditorView, keymap, ViewPlugin, ViewUpdate, WidgetType } from '@codemirror/view';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
-import { defaultKeymap, history, historyKeymap, indentLess, indentMore } from '@codemirror/commands';
+import { defaultKeymap, history, historyKeymap, indentLess, indentMore, insertNewline } from '@codemirror/commands';
 import { syntaxTree } from '@codemirror/language';
 
 export interface MarkdownHost {
   image?: (target: string) => string | undefined;
   onSubmit?: () => void;
+  submitOnEnter?: () => boolean;
   onAttach?: () => void;
 }
 
@@ -162,6 +163,8 @@ export function createMarkdownEditor(parent: HTMLElement, value: string, onChang
     Prec.highest(keymap.of([
       { key: 'Mod-b', run: commands.bold }, { key: 'Mod-i', run: commands.italic }, { key: 'Mod-k', run: commands.link }, { key: 'Mod-/', run: commands.source },
       { key: 'Mod-Enter', run: v => { if (!permitted(v) || !host.onSubmit) return false; host.onSubmit(); return true; } },
+      { key: 'Shift-Enter', run: v => host.submitOnEnter?.() && permitted(v) ? insertNewline(v) : false },
+      { key: 'Enter', run: v => { if (!permitted(v) || !host.onSubmit || !host.submitOnEnter?.()) return false; host.onSubmit(); return true; } },
       { key: 'Mod-Shift-u', run: v => { if (!permitted(v) || !host.onAttach) return false; host.onAttach(); return true; } },
       { key: 'Tab', run: v => permitted(v) && inList(v) ? indentMore(v) : false }, { key: 'Shift-Tab', run: v => permitted(v) && inList(v) ? indentLess(v) : false },
     ])),

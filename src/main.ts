@@ -26,8 +26,9 @@ interface Settings {
   draftStorageId?: string;
   layout?: LayoutPreferences;
   trackpadNavigation: boolean;
+  commentSubmit: 'mod-enter' | 'enter';
 }
-const DEFAULTS: Settings = { root: 'Local Issues', author: '我', apiEnabled: false, port: 27183, shares: {}, trackpadNavigation: true };
+const DEFAULTS: Settings = { root: 'Local Issues', author: '我', apiEnabled: false, port: 27183, shares: {}, trackpadNavigation: true, commentSubmit: 'mod-enter' };
 
 export default class LocalIssuesPlugin extends Plugin implements ViewHost {
   declare settings: Settings;
@@ -51,6 +52,7 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
   private layoutSave: Promise<void> = Promise.resolve();
   get author(): string { return this.settings.author; }
   get trackpadNavigation(): boolean { return this.settings.trackpadNavigation; }
+  get commentSubmit(): 'mod-enter' | 'enter' { return this.settings.commentSubmit; }
   get layout(): LayoutPreferences { return this.settings.layout || {}; }
   async saveLayout(patch: Partial<LayoutPreferences>): Promise<void> {
     this.layoutSave = this.layoutSave.catch(() => {}).then(async () => {
@@ -404,6 +406,10 @@ class LocalIssuesSettings extends PluginSettingTab {
         const v = value.trim().replace(/\/$/, '');
         if (!v || v.startsWith('/') || v.includes('\\') || v.split('/').some(s => !s || s === '.' || s === '..' || s.startsWith('.'))) return;
         p.settings.root = v; await p.saveSettings();
+      }));
+    new Setting(el).setName('评论发布快捷键').setDesc('选择「回车发表」时，Enter 发表、Shift+Enter 换行；选择「快捷键发表」时，⌘/Ctrl+Enter 发表、Enter 换行。')
+      .addDropdown(d => d.addOption('mod-enter', '快捷键发表（⌘/Ctrl+Enter）').addOption('enter', '回车发表（Enter）').setValue(p.settings.commentSubmit).onChange(async value => {
+        p.settings.commentSubmit = value === 'enter' ? 'enter' : 'mod-enter'; await p.saveSettings();
       }));
     if (Platform.isMacOS) {
       new Setting(el).setName('触控板双指导航').setDesc('在 Local Issues 页面双指向右滑返回、向左滑前进；输入和横向滚动时不会触发。')

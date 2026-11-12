@@ -11,7 +11,7 @@ import { trackpadNavigation, type HistoryDirection } from './trackpad-navigation
 import { ISSUE_STATUSES, STATUS_NAMES, CLOSE_REASON_NAMES, issueLink, CloseReason, Issue, IssueInput, IssuePatch, IssueStore, Project, ProjectStatus, Snapshot, TimelineEntry } from './types';
 
 export const VIEW_TYPE = 'local-issues-view';
-export interface ViewHost { draftCache?: Drafts; store: IssueStore; author: string; layout?: LayoutPreferences; saveLayout?(patch: Partial<LayoutPreferences>): Promise<void>; trackpadNavigation?: boolean; navigateHistory?(leaf: WorkspaceLeaf, direction: HistoryDirection): void; openNote(path: string): Promise<void>; resourceLink(ref?: string, scope?: 'issues'): Promise<string>; openSettings(): void; }
+export interface ViewHost { draftCache?: Drafts; store: IssueStore; author: string; layout?: LayoutPreferences; saveLayout?(patch: Partial<LayoutPreferences>): Promise<void>; trackpadNavigation?: boolean; commentSubmit?: 'mod-enter' | 'enter'; navigateHistory?(leaf: WorkspaceLeaf, direction: HistoryDirection): void; openNote(path: string): Promise<void>; resourceLink(ref?: string, scope?: 'issues'): Promise<string>; openSettings(): void; }
 const PROJECT_STATES: ProjectStatus[] = ['active', 'paused', 'completed', 'archived'];
 const el = <K extends keyof HTMLElementTagNameMap>(parent: HTMLElement, tag: K, cls = '', text = ''): HTMLElementTagNameMap[K] => { const node = document.createElement(tag); node.className = cls; if (text) node.textContent = text; parent.append(node); return node; };
 function prependIcon(parent: HTMLElement, name: string) { const icon = el(parent, 'span', 'li-icon'); setIcon(icon, name); icon.setAttribute('aria-hidden', 'true'); parent.prepend(icon); parent.addClass('li-with-icon'); }
@@ -733,10 +733,30 @@ export class IssuesView extends ItemView {
     const timeline = el(main, 'div', 'li-timeline'); const entries = this.data.timeline.filter(e => e.issueId === issue.id).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     for (const entry of entries) { if (entry.kind === 'event') { const event = el(timeline, 'div', 'li-event'); pill(event, entry.to || 'open'); el(event, 'span', '', `${entry.author} ${entry.body}`); el(event, 'span', 'li-muted', date(entry.createdAt)); } else { const comment = el(timeline, 'article', 'li-comment'); comment.dataset.commentId = entry.id; const head = el(comment, 'div', 'li-comment-header'); el(head, 'strong', '', entry.author); el(head, 'span', 'li-muted', `${date(entry.createdAt)}${entry.updatedAt !== entry.createdAt ? ' · 已编辑' : ''}`); el(head, 'div', 'li-spacer'); const content = el(comment, 'div', 'li-description-content'); const edit = action(head, '编辑', () => safe(() => this.afterEditing(() => { edit.hidden = true; content.replaceChildren(); const text = this.editor(content, entry.body, issue.id, entry.path); const buttons = text.actions; const draft = this.cacheForm(text.element, `comment:${entry.id}`, entry.revision ?? entry.updatedAt); this.startEditing(text.element, `评论 · ${entry.author} · ${date(entry.createdAt)} · ${entry.body.replace(/\s+/g, ' ').slice(0, 40)}`, () => text.value !== entry.body || text.uploading, () => { text.destroy(); content.replaceChildren(); this.markdown(content, entry.body, entry.path); edit.hidden = false; }); action(buttons, '取消', () => { this.stopEditing(true); if (this.pending) safe(() => this.draw()); }); const save = action(buttons, '保存', () => safe(async () => { if (!text.value.trim()) throw new Error('评论不能为空'); if (text.uploading) throw new Error('附件正在保存，请稍后保存'); save.disabled = true; try { const submitted = draft.snapshot(); await this.host.store.editComment(entry.id, text.value, draft.revision); draft.complete(submitted); this.stopEditing(); await this.draw(); } finally { save.disabled = false; } }), 'mod-cta'); text.focus(); })), 'li-subtle'); action(head, '笔记', () => safe(() => this.host.openNote(entry.path)), 'li-subtle'); action(head, '删除', () => this.deleteComment(comment, entry), 'li-subtle li-delete-comment'); this.markdown(content, entry.body, entry.path); } }
     const compose = () => {
-      const composer = el(main, 'section', 'li-composer'); el(composer, 'h3', '', '发表评论'); const editor = this.editor(composer, this.drafts.get(issue.id) || '', issue.id, issue.path, value => this.drafts.set(issue.id, value)); const status = el(editor.element, 'div', 'li-composer-status'); status.setAttribute('role', 'status'); const footer = editor.actions;
+      const composer = el(main, 'section', 'li-composer'); el(composer, 'h3', '', '发表评论'); const editor = this.editor(composer, this.drafts.get(issue.id) || '', issue.id, issue.path, value => this.drafts.set(issue.id, value), () => this.host.commentSubmit === 'enter'); const status = el(editor.element, 'div', 'li-composer-status'); status.setAttribute('role', 'status'); const footer = editor.actions;
       if (!this.phone) {
-        let closeReason: CloseReason = 'completed'; if (issue.status !== 'closed') select(footer, Object.entries(CLOSE_REASON_NAMES) as [string, string][], closeReason, value => { closeReason = value as CloseReason; }).setAttribute('aria-label', '关闭原因');
-        const close = action(footer, issue.status === 'closed' ? '重新打开 Issue' : '关闭 Issue', () => safe(() => this.afterEditing(async () => { close.disabled = true; try { await this.host.store.updateIssue(issue.id, { status: issue.status === 'closed' ? 'open' : 'closed', ...(issue.status !== 'closed' ? { closeReason } : {}), actor: this.host.author }, issue.revision ?? issue.updatedAt); await this.draw(); } finally { close.disabled = false; } })), '', issue.status === 'closed' ? 'circle-dot' : 'circle-check');
+        if (issue.status === 'closed') action(footer, '重新打开 Issue', () => safe(() => this.afterEditing(async () => { await this.host.store.updateIssue(issue.id, { status: 'open', actor: this.host.author }, issue.revision ?? issue.updatedAt); await this.draw(); })), '', 'circle-dot');
+        else {
+          const split = el(footer, 'div', 'li-close-actions');
+          let closing = false;
+          let close: HTMLButtonElement, choices: HTMLButtonElement;
+          const closeIssue = (reason: CloseReason) => {
+            if (closing) return;
+            safe(() => this.afterEditing(async () => {
+              closing = true; close.disabled = choices.disabled = true;
+              try { await this.host.store.updateIssue(issue.id, { status: 'closed', closeReason: reason, actor: this.host.author }, issue.revision ?? issue.updatedAt); await this.draw(); }
+              finally { closing = false; close.disabled = choices.disabled = false; }
+            }));
+          };
+          close = action(split, '关闭 Issue', () => closeIssue('completed'), 'li-close-primary', 'circle-check');
+          choices = action(split, '', () => undefined, 'li-close-toggle', 'chevron-down');
+          choices.setAttribute('aria-label', '选择关闭方式'); choices.setAttribute('aria-haspopup', 'menu'); choices.title = '选择关闭方式';
+          choices.addEventListener('click', event => {
+            const menu = new Menu();
+            for (const [reason, name] of Object.entries(CLOSE_REASON_NAMES) as [CloseReason, string][]) menu.addItem(item => item.setTitle(`关闭 · ${name}`).setIcon(STATE_ICONS[reason]).onClick(() => closeIssue(reason)));
+            menu.showAtMouseEvent(event);
+          });
+        }
       }
       const draft = this.cacheForm(editor.element, `new-comment:${issue.id}`);
       const send = async () => {
@@ -1072,7 +1092,7 @@ export class IssuesView extends ItemView {
   }
   private modal(title: string) { const modal = new MobileModal(this.app); this.bindMarkdownShortcuts(modal.scope); suppressTooltips(modal.modalEl); modal.modalEl.addClass('li-modal-container'); modal.contentEl.addClass('local-issues', 'li-modal'); modal.titleEl.setText(title); return modal; }
   private saveButton(modal: Modal, run: () => Promise<void>) { const buttons = el(modal.modalEl, 'div', 'li-modal-actions'); action(buttons, '取消', () => modal.close()); const feedback = el(modal.contentEl, 'p', 'li-form-error'); feedback.setAttribute('role', 'alert'); const save = action(buttons, '保存', () => safe(async () => { if (save.disabled) return; save.disabled = true; feedback.textContent = ''; try { if (modal.contentEl.querySelector('[data-uploading]')) throw new Error('附件正在保存，请稍后保存'); await run(); } catch (error) { feedback.textContent = error instanceof Error ? error.message : String(error); } finally { save.disabled = false; } }), 'mod-cta'); }
-  private editor(parent: HTMLElement, initial: string, ref: string, sourcePath: string, changed?: (body: string) => void) {
+  private editor(parent: HTMLElement, initial: string, ref: string, sourcePath: string, changed?: (body: string) => void, submitOnEnter?: () => boolean) {
     const container = el(parent, 'div', 'li-editor'); const tools = el(container, 'div', 'li-editor-toolbar');
     const tabs = el(tools, 'div', 'li-editor-tabs');
     const formatting = el(tools, 'div', 'li-editor-formatting'); formatting.setAttribute('role', 'toolbar'); formatting.setAttribute('aria-label', 'Markdown 格式');
@@ -1082,6 +1102,7 @@ export class IssuesView extends ItemView {
     let disposed = false, uploads = 0;
     const view = createLiveMarkdown(this.app, liveContainer, initial, sourcePath, value => { changed?.(value); container.dispatchEvent(new container.ownerDocument.defaultView!.Event('li-editor-change', { bubbles: true })); }, {
       onSubmit: () => { if (!uploads) (actions.querySelector<HTMLButtonElement>('.mod-cta') || container.closest('.li-create')?.querySelector<HTMLButtonElement>('.li-inline-actions .mod-cta') || container.closest('.modal')?.querySelector<HTMLButtonElement>('.li-modal-actions .mod-cta'))?.click(); },
+      submitOnEnter,
       onAttach: () => { if (ref) picker.click(); else new Notice('请先创建项目，再添加附件'); },
     });
     this.shortcutEditors.set(liveContainer, view);

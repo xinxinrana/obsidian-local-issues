@@ -25,7 +25,7 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     removeFolder: async p => { for (const key of [...files.keys()]) if (key.startsWith(`${p}/`)) files.delete(key); } };
   const store = new Store(adapter), copied: string[] = [], opened: string[] = [], shared: string[] = [];
   const app = { metadataCache: { getFirstLinkpathDest: () => null }, vault: { getMarkdownFiles: () => [...files.keys()].map(path => ({ path })) }, workspace: { openLinkText: async () => {} } };
-  const host = { store, author: 'Evan', openNote: async (path: string) => { opened.push(path); }, resourceLink: async (ref?: string) => { shared.push(ref); return 'http://localhost:27183/local-issues/issues/5'; }, openSettings() {} };
+  const host = { store, author: 'Evan', commentSubmit: 'mod-enter', openNote: async (path: string) => { opened.push(path); }, resourceLink: async (ref?: string) => { shared.push(ref); return 'http://localhost:27183/local-issues/issues/5'; }, openSettings() {} };
   const built = await build({ entryPoints: ['src/view.ts'], bundle: true, write: false, format: 'cjs', platform: 'node', external: ['obsidian'], logLevel: 'silent' });
   const module = { exports: {} as any };
   vm.runInNewContext(built.outputFiles[0].text, { module, exports: module.exports, require: (id: string) => id === 'obsidian' ? mock : require(id),
@@ -88,10 +88,10 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     let text = composer().querySelector('.cm-content') as HTMLTextAreaElement;
     assert.deepEqual([...composer().querySelectorAll('.li-editor-tabs button')].map(button => button.textContent), ['编写', '预览']);
     assert.ok(composer().querySelector('.li-editor-formatting button'));
-    assert.equal(composer().querySelector('.li-select-control .li-icon')?.getAttribute('data-icon'), 'circle-check');
-    const reason = composer().querySelector<HTMLSelectElement>('select[aria-label="关闭原因"]')!;
-    reason.value = 'on-hold'; reason.dispatchEvent(new dom.window.Event('change'));
-    assert.equal(composer().querySelector('.li-select-control .li-icon')?.getAttribute('data-icon'), 'circle-pause');
+    assert.ok(composer().querySelector('.li-close-actions'));
+    assert.equal(composer().querySelector('.li-close-primary .li-icon')?.getAttribute('data-icon'), 'circle-check');
+    assert.ok(composer().querySelector('button[aria-label="选择关闭方式"]'));
+    assert.equal(composer().querySelector('select[aria-label="关闭原因"]'), null, '关闭原因不再要求预先选择');
     fill(text, '快捷键'); cm(text).dispatch({ selection: { anchor: 0, head: 3 } });
     const shortcut = new dom.window.KeyboardEvent('keydown', { key: 'b', metaKey: true, cancelable: true });
     Object.defineProperty(shortcut, 'target', { value: text });
@@ -141,7 +141,11 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     click('编辑标题'); const titleInput = view.contentEl.querySelector('input[aria-label="议题标题"]'); fill(titleInput, '修改后的标题'); click('保存', view.contentEl.querySelector('.li-detail-title'));
     await until(async () => (await store.getIssue(issue.id)).title === '修改后的标题', '原位保存标题');
     click('关闭 Issue'); await until(async () => (await store.getIssue(issue.id)).status === 'closed' && view.contentEl.textContent.includes('重新打开 Issue'), '关闭 Issue');
+    assert.equal((await store.getIssue(issue.id)).closeReason, 'completed', '主按钮直接按完成关闭');
     click('重新打开 Issue'); await until(async () => (await store.getIssue(issue.id)).status === 'open' && view.contentEl.textContent.includes('关闭 Issue'), '重新打开');
+    click('选择关闭方式', composer()); menuAction('关闭 · 搁置');
+    await until(async () => (await store.getIssue(issue.id)).closeReason === 'on-hold', '菜单选择搁置后立即关闭');
+    click('重新打开 Issue'); await until(async () => (await store.getIssue(issue.id)).status === 'open', '搁置后可以重新打开');
     assert.equal((await store.snapshot()).timeline.filter(t => t.kind === 'comment').length, 2);
     text = composer().querySelector('.cm-content')!; fill(text, '未发送的草稿'); text.focus(); await view.refresh();
     assert.equal(value(composer().querySelector('.cm-content')), '未发送的草稿');
@@ -496,6 +500,18 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     const moving = await store.createIssue(movingSource.id, { title: '从界面移动与删除', body: '保留正文' });
     await store.addComment(moving.id, '保留讨论');
     await view.navigate(movingSource.id, moving.id);
+    const keyboardComment = composer().querySelector('.cm-content');
+    fill(keyboardComment, '默认回车换行');
+    keyboardComment.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    assert.equal(value(keyboardComment), '默认回车换行\n', '默认模式按 Enter 只换行');
+    assert.equal((await store.snapshot()).timeline.filter(t => t.issueId === moving.id && t.kind === 'comment').length, 1);
+    host.commentSubmit = 'enter'; fill(keyboardComment, '单回车发表');
+    keyboardComment.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await until(async () => (await store.snapshot()).timeline.filter(t => t.issueId === moving.id && t.kind === 'comment').length === 2, '设置后单回车发表评论');
+    const shiftComment = composer().querySelector('.cm-content'); fill(shiftComment, '保留换行');
+    shiftComment.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true, cancelable: true }));
+    assert.equal(value(shiftComment), '保留换行\n', '回车发表模式下 Shift+Enter 仍换行');
+    assert.equal((await store.snapshot()).timeline.filter(t => t.issueId === moving.id && t.kind === 'comment').length, 2);
     view.contentEl.querySelector<HTMLButtonElement>('[aria-label="Issue 更多操作"]')!.click(); menuAction('移动议题');
     await until(() => mock.modals.some((m: any) => m.titleEl.textContent === '移动议题'), '移动窗口');
     let moveModal = mock.modals.at(-1); moveModal.contentEl.querySelector('select').value = movingProject.id;

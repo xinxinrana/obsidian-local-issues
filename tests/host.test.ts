@@ -161,6 +161,10 @@ test('bundled plugin registers native entry points; Vault adapter, protocol, API
     const trackpadToggle = trackpadSetting.querySelector('input[type=checkbox]') as HTMLInputElement;
     assert.equal(trackpadToggle.checked, true); trackpadToggle.checked = false; trackpadToggle.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
     await new Promise(resolve => setTimeout(resolve, 0)); assert.equal(plugin.settings.trackpadNavigation, false);
+    const commentSetting = [...settingsEl.querySelectorAll('.setting-item')].find((item: any) => item.textContent.includes('评论发布快捷键'));
+    const commentSubmit = commentSetting.querySelector('select') as HTMLSelectElement;
+    assert.equal(commentSubmit.value, 'mod-enter'); commentSubmit.value = 'enter'; commentSubmit.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 0)); assert.equal(plugin.settings.commentSubmit, 'enter');
     mock.Platform.isMacOS = false;
     const install = [...settingsEl.querySelectorAll('button')].find((button: any) => button.textContent === '安装 CLI') as HTMLButtonElement;
     assert.ok(install); assert.equal(settingsEl.querySelector('.li-cli-progress input'), null, 'No advanced Node controls before a failure');
