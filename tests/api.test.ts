@@ -35,7 +35,13 @@ test('API uses Markdown store for project → issue → comments, edits and stat
     const comment = await f.request(`/api/issues/${id}/comments`, 'POST', { body: '第一条 **评论** [[设计稿]]', author: 'Agent A' });
     const second = await f.request(`/api/issues/${id}/comments`, 'POST', { body: '第二条评论' });
     assert.equal(second.status, 201);
-    assert.equal((await f.request(`/api/comments/${comment.data.id}`, 'PATCH', { body: '修改后的评论' })).data.body, '修改后的评论');
+    const corrected = await f.request(`/api/comments/${comment.data.id}`, 'PATCH', { body: '修改后的评论', author: 'WorkBuddy' });
+    assert.equal(corrected.data.body, '修改后的评论');
+    assert.equal(corrected.data.author, 'WorkBuddy');
+    const preserved = await f.request(`/api/comments/${comment.data.id}`, 'PATCH', { body: '保留作者的评论', actor: undefined });
+    assert.equal(preserved.data.author, 'WorkBuddy');
+    const viaActor = await f.request(`/api/comments/${comment.data.id}`, 'PATCH', { body: '保留作者的评论', actor: 'CLI Agent' });
+    assert.equal(viaActor.data.author, 'CLI Agent');
     const closed = await f.request(`/api/issues/${id}/close`, 'POST', { closeReason: 'on-hold' }); assert.equal(closed.data.status, 'closed'); assert.equal(closed.data.closeReason, 'on-hold');
     assert.equal((await f.request(`/api/issues/${id}/reopen`, 'POST')).data.status, 'open');
     const detail = await f.request(`/api/issues/${id}`);

@@ -58,12 +58,12 @@ var HELP = `Local Issues \xB7 Obsidian \u672C\u5730\u9879\u76EE\u4E0E Issues
   project list | view <\u9879\u76EE> | create | edit <\u9879\u76EE> | delete <\u9879\u76EE> | share <\u9879\u76EE>
   issue list | view <\u7F16\u53F7/\u53CC\u94FE/ID/\u5206\u4EABURL> | create | edit <\u5F15\u7528>
   issue comment <\u5F15\u7528> | close <\u5F15\u7528> | reopen <\u5F15\u7528>
-  issue attach <\u5F15\u7528> <\u6587\u4EF6> | share <\u5F15\u7528>
+  issue attach <\u5F15\u7528> <\u6587\u4EF6> [--author <\u540D\u5B57>] | share <\u5F15\u7528>
   issue delete <\u5F15\u7528> | move <\u5F15\u7528> --to <\u76EE\u6807\u9879\u76EE>
-  comment edit <\u8BC4\u8BBAID> --body "\u5185\u5BB9"
+  comment edit <\u8BC4\u8BBAID> --body "\u5185\u5BB9" [--author <\u540D\u5B57>]
   comment delete <\u8BC4\u8BBAID>
-  share view <\u5206\u4EABURL> | edit <\u5206\u4EABURL> | comment <\u5206\u4EABURL>
-  share comment-edit <\u5206\u4EABURL> <\u8BC4\u8BBAID> --body "\u5185\u5BB9"
+  share view <\u5206\u4EABURL> | edit <\u5206\u4EABURL> | comment <\u5206\u4EABURL> [--author <\u540D\u5B57>]
+  share comment-edit <\u5206\u4EABURL> <\u8BC4\u8BBAID> --body "\u5185\u5BB9" [--author <\u540D\u5B57>]
   resolve '[[\u7B14\u8BB0\u6216Issue]]'
   api <\u63A5\u53E3\u8DEF\u5F84> [-X METHOD] [-f key=value]
 
@@ -81,7 +81,7 @@ var HELP = `Local Issues \xB7 Obsidian \u672C\u5730\u9879\u76EE\u4E0E Issues
       --parent <Issue>     \u7236\u8BAE\u9898\uFF1B\u7A7A\u5B57\u7B26\u4E32\u53EF\u6E05\u9664
       --depends-on <Issue> \u4F9D\u8D56\uFF1B\u53EF\u591A\u6B21\u4F7F\u7528
       --due-date YYYY-MM-DD
-      --author <\u540D\u5B57>      \u8BC4\u8BBA\u6216\u521B\u5EFA\u8005\uFF0C\u9ED8\u8BA4 Agent
+      --author <\u540D\u5B57>      \u5199\u64CD\u4F5C\u8EAB\u4EFD\uFF1BAgent \u8C03\u7528\u5FC5\u987B\u586B\u5199\u81EA\u5DF1\u7684\u540D\u5B57
   -S, --search <\u5173\u952E\u8BCD>    \u641C\u7D22\u6807\u9898\u3001\u6B63\u6587\u3001\u6807\u7B7E
   -L, --limit <\u6570\u91CF>       \u5217\u8868\u4E0A\u9650\uFF0C\u9ED8\u8BA4 30
       --json [\u5B57\u6BB5,\u5B57\u6BB5]   \u8F93\u51FA JSON\uFF0C\u7701\u7565\u5B57\u6BB5\u8F93\u51FA\u5B8C\u6574\u5BF9\u8C61
@@ -95,10 +95,10 @@ var HELP = `Local Issues \xB7 Obsidian \u672C\u5730\u9879\u76EE\u4E0E Issues
 
 \u793A\u4F8B:
   local-issues project create -t "\u6211\u7684\u9879\u76EE"
-  local-issues issue create -P "\u6211\u7684\u9879\u76EE" -t "\u652F\u6301\u56FE\u7247" -b "\u8BF4\u660E [[\u8BBE\u8BA1\u7A3F]]"
-  local-issues issue comment 1 -P "\u6211\u7684\u9879\u76EE" -F comment.md
+  local-issues issue create -P "\u6211\u7684\u9879\u76EE" -t "\u652F\u6301\u56FE\u7247" -b "\u8BF4\u660E [[\u8BBE\u8BA1\u7A3F]]" --author "\u6211\u7684\u540D\u5B57"
+  local-issues issue comment 1 -P "\u6211\u7684\u9879\u76EE" -F comment.md --author "\u6211\u7684\u540D\u5B57"
   local-issues issue list -P "\u6211\u7684\u9879\u76EE" --state all --json number,title,status
-  local-issues issue attach 1 -P "\u6211\u7684\u9879\u76EE" screenshot.png
+  local-issues issue attach 1 -P "\u6211\u7684\u9879\u76EE" screenshot.png --author "\u6211\u7684\u540D\u5B57"
   local-issues issue share '[[Local Issues/\u9879\u76EE/issues/0001]]'
 
 \u9700\u8981\u5728 Obsidian \u4E2D\u542F\u7528 Local Issues \u548C\u672C\u5730 API\u3002API \u53EA\u76D1\u542C\u672C\u673A\u3002
@@ -114,12 +114,12 @@ var COMMAND_HELP = {
 
   list [-P \u9879\u76EE] [--state open|closed|all] [-S \u5173\u952E\u8BCD] [-l \u6807\u7B7E] [-L \u6570\u91CF]
   view <\u7F16\u53F7|\u94FE\u63A5> [-c]
-  create -P \u9879\u76EE -t \u6807\u9898 [-b \u6B63\u6587] [-l \u6807\u7B7E] [--milestone \u540D\u79F0] [--parent \u8BAE\u9898] [--depends-on \u8BAE\u9898]
+  create -P \u9879\u76EE -t \u6807\u9898 [-b \u6B63\u6587] [-l \u6807\u7B7E] [--milestone \u540D\u79F0] [--parent \u8BAE\u9898] [--depends-on \u8BAE\u9898] [--author \u540D\u5B57]
   edit <\u7F16\u53F7|\u94FE\u63A5> [-b \u6B63\u6587 | -F \u6587\u4EF6] [--add-label x] [--remove-label x] [--if-match \u65F6\u95F4]
   comment <\u7F16\u53F7|\u94FE\u63A5> -b \u8BC4\u8BBA | -F \u6587\u4EF6 [--author \u540D\u5B57]
   close <\u7F16\u53F7|\u94FE\u63A5> [--reason completed|on-hold|not-planned]
   reopen <\u7F16\u53F7|\u94FE\u63A5>
-  attach <\u7F16\u53F7|\u94FE\u63A5> <\u6587\u4EF6>
+  attach <\u7F16\u53F7|\u94FE\u63A5> <\u6587\u4EF6> [--author \u540D\u5B57]   \u4E0A\u4F20\u9644\u4EF6\u5E76\u521B\u5EFA\u4E00\u6761\u8BC4\u8BBA
   share <\u7F16\u53F7|\u94FE\u63A5>
   delete <\u7F16\u53F7|\u94FE\u63A5>
   move <\u7F16\u53F7|\u94FE\u63A5> --to <\u76EE\u6807\u9879\u76EE>
@@ -133,16 +133,17 @@ var COMMAND_HELP = {
   edit <\u9879\u76EE> [-t \u6807\u9898] [-b \u63CF\u8FF0] [--state \u72B6\u6001]
   delete <\u9879\u76EE> [--force]   \u8FDE\u76EE\u5F55\u4E00\u8D77\u5220\u9664\uFF08\u8FDB\u5E9F\u7EB8\u7BD3\uFF0C\u53EF\u6062\u590D\uFF09\uFF1B\u9879\u76EE\u91CC\u8FD8\u6709\u8BAE\u9898\u65F6\u5FC5\u987B\u52A0 --force
   share <\u9879\u76EE>`,
-  comment: `\u7528\u6CD5: local-issues comment edit <\u8BC4\u8BBAID> -b \u5185\u5BB9 | comment delete <\u8BC4\u8BBAID>
+  comment: `\u7528\u6CD5: local-issues comment edit <\u8BC4\u8BBAID> -b \u5185\u5BB9 [--author \u540D\u5B57] | comment delete <\u8BC4\u8BBAID>
 
-\u8BC4\u8BBA ID \u6765\u81EA local-issues issue view <\u7F16\u53F7> -c \u7684\u65F6\u95F4\u7EBF\u3002`,
+\u8BC4\u8BBA ID \u6765\u81EA local-issues issue view <\u7F16\u53F7> -c \u7684\u65F6\u95F4\u7EBF\u3002
+\u7F16\u8F91\u65F6\u4F20 --author \u53EF\u66F4\u6B63\u4F5C\u8005\uFF1B\u4E0D\u4F20\u5219\u4FDD\u7559\u539F\u4F5C\u8005\u3002`,
   skill: `\u7528\u6CD5: local-issues skill [--dir <\u76EE\u5F55>]
 
 \u4E0D\u5E26 --dir \u65F6\u8F93\u51FA SKILL.md\uFF1B\u5E26 --dir \u65F6\u5199\u5165 <\u76EE\u5F55>/local-issues/SKILL.md\u3002`,
   api: `\u7528\u6CD5: local-issues api <\u63A5\u53E3\u8DEF\u5F84> [-X \u65B9\u6CD5] [-f key=value]
 
 \u547D\u4EE4\u6CA1\u8986\u76D6\u7684\u63A5\u53E3\u76F4\u63A5\u8C03\u7528\uFF0C\u4F8B\u5982 api /api/health\u3001api /api/issues/5 -X PATCH -f status=closed\u3002`,
-  share: `\u7528\u6CD5: local-issues share view <\u5206\u4EABURL> | edit | comment | comment-edit <\u8BC4\u8BBAID>`
+  share: `\u7528\u6CD5: local-issues share view <\u5206\u4EABURL> | edit | comment [--author \u540D\u5B57] | comment-edit <\u8BC4\u8BBAID> [--author \u540D\u5B57]`
 };
 var aliases = { c: "comments", P: "project", t: "title", b: "body", F: "body-file", l: "label", a: "assignee", s: "state", S: "search", L: "limit", h: "help", X: "method", f: "field", H: "header" };
 var booleans = /* @__PURE__ */ new Set(["help", "web", "comment", "comments", "version", "force"]);
@@ -190,10 +191,9 @@ function warnMissingAuthor(f) {
   if (val(f, "author") !== void 0) return;
   const line = "!".repeat(60);
   const notice = [
-    line,
-    "\u8B66\u544A\uFF1A\u8FD9\u6761\u8BB0\u5F55\u6CA1\u6709\u8EAB\u4EFD\u6807\u7B7E\uFF0C\u65F6\u95F4\u7EBF\u91CC\u4F1A\u663E\u793A\u4E3A\u300CAgent\u300D\u3002",
-    "\u591A\u4E2A agent \u6216\u4EBA\u5171\u7528\u540C\u4E00\u6761\u8BAE\u9898\u65F6\uFF0C\u4E8B\u540E\u65E0\u6CD5\u5206\u8FA8\u662F\u8C01\u5199\u7684\u3002",
-    "\u64CD\u4F5C\u5DF2\u751F\u6548\uFF0C\u4E0D\u7528\u91CD\u8BD5\uFF1B\u4E0B\u6B21\u8BF7\u52A0 --author <\u540D\u5B57>\uFF0C\u4F8B\u5982 --author Pi\u3002",
+    "\u8B66\u544A\uFF1A\u8BF7\u7528 --author <\u4F60\u7684\u540D\u5B57> \u6807\u660E\u8EAB\u4EFD\uFF0C\u4E0D\u8981\u4F9D\u8D56\u9ED8\u8BA4\u503C\u300CAgent\u300D\u3002",
+    "\u8FD9\u6761\u8BB0\u5F55\u6CA1\u6709\u8EAB\u4EFD\u6807\u7B7E\uFF0C\u591A\u4E2A agent \u6216\u4EBA\u5171\u7528\u8BAE\u9898\u65F6\u4F1A\u96BE\u4EE5\u5206\u8FA8\u6765\u6E90\u3002",
+    "\u8BC4\u8BBA\u5199\u9519\u540E\u53EF\u7528 comment edit <\u8BC4\u8BBAID> -b <\u539F\u6587> --author <\u4F60\u7684\u540D\u5B57> \u66F4\u6B63\u3002",
     line
   ].join("\n");
   console.error(notice);
@@ -399,12 +399,12 @@ async function main() {
       data = await api.request(url.pathname + url.search, "PATCH", patch);
     } else if (action === "close" || action === "reopen") data = await api.request(url.pathname + url.search, "PATCH", { status: action === "close" ? "closed" : "open", ...action === "close" && val(flags, "reason") ? { closeReason: val(flags, "reason") } : {}, actor: val(flags, "author") ?? "Agent" });
     else if (action === "comment") {
+      warnMissingAuthor(flags);
       url.pathname = url.pathname.replace(/\/resolve$/, "/comments");
       data = await api.request(url.pathname + url.search, "POST", { body: required(body(flags), "\u8BC4\u8BBA\u6B63\u6587\uFF08--body \u6216 --body-file\uFF09"), author: val(flags, "author") ?? "Agent" });
-      warnMissingAuthor(flags);
     } else if (action === "comment-edit") {
       url.pathname = url.pathname.replace(/\/resolve$/, `/comments/${encodeURIComponent(required(extra, "\u8BC4\u8BBAID"))}`);
-      data = await api.request(url.pathname + url.search, "PATCH", { body: required(body(flags), "\u8BC4\u8BBA\u6B63\u6587\uFF08--body \u6216 --body-file\uFF09") });
+      data = await api.request(url.pathname + url.search, "PATCH", { body: required(body(flags), "\u8BC4\u8BBA\u6B63\u6587\uFF08--body \u6216 --body-file\uFF09"), ...val(flags, "author") !== void 0 ? { author: val(flags, "author") } : {} });
     } else throw new Error("\u5206\u4EAB\u94FE\u63A5\u652F\u6301 view\u3001edit\u3001comment\u3001comment-edit\u3001close\u3001reopen\u3002");
   } else if (command === "repo") {
     if (action === "view" && resourceUrl && resource?.kind === "repo") data = await api.request(resourceUrl.toString());
@@ -472,8 +472,10 @@ async function main() {
 ${note}` : ""}`;
       }
     } else if (action === "view") data = await api.request(issuePath(required(ref, "Issue \u5F15\u7528")));
-    else if (action === "create") data = await api.request("/api/issues", "POST", { ...issuePatch(flags), title: required(val(flags, "title"), "\u6807\u9898\uFF08--title\uFF09"), project: required(project, "\u9879\u76EE\uFF08--project\uFF09"), author: val(flags, "author") ?? "Agent" });
-    else if (action === "edit") {
+    else if (action === "create") {
+      warnMissingAuthor(flags);
+      data = await api.request("/api/issues", "POST", { ...issuePatch(flags), title: required(val(flags, "title"), "\u6807\u9898\uFF08--title\uFF09"), project: required(project, "\u9879\u76EE\uFF08--project\uFF09"), author: val(flags, "author") ?? "Agent" });
+    } else if (action === "edit") {
       const patch = issuePatch(flags);
       patch.actor = val(flags, "author") ?? "Agent";
       delete patch.author;
@@ -484,22 +486,22 @@ ${note}` : ""}`;
       }
       data = await api.request(issuePath(required(ref, "Issue \u5F15\u7528")), "PATCH", patch);
     } else if (action === "comment") {
-      data = await api.request(subPath(required(ref, "Issue \u5F15\u7528"), "comments"), "POST", { body: required(body(flags), "\u8BC4\u8BBA\u6B63\u6587\uFF08--body \u6216 --body-file\uFF09"), author: val(flags, "author") ?? "Agent" });
       warnMissingAuthor(flags);
+      data = await api.request(subPath(required(ref, "Issue \u5F15\u7528"), "comments"), "POST", { body: required(body(flags), "\u8BC4\u8BBA\u6B63\u6587\uFF08--body \u6216 --body-file\uFF09"), author: val(flags, "author") ?? "Agent" });
     } else if (action === "close" || action === "reopen") data = await api.request(subPath(required(ref, "Issue \u5F15\u7528"), action), "POST", { ...action === "close" && val(flags, "reason") ? { closeReason: val(flags, "reason") } : {}, actor: val(flags, "author") ?? "Agent" });
     else if (action === "delete") data = await api.request(issuePath(required(ref, "Issue \u5F15\u7528")), "DELETE");
     else if (action === "move") data = await api.request(subPath(required(ref, "Issue \u5F15\u7528"), "move"), "POST", { project: required(val(flags, "to"), "\u76EE\u6807\u9879\u76EE\uFF08--to\uFF09") });
     else if (action === "attach") {
+      warnMissingAuthor(flags);
       const file = resolve(required(extra, "\u9644\u4EF6\u6587\u4EF6"));
       const attachment = await api.request(subPath(required(ref, "Issue \u5F15\u7528"), "attachments"), "POST", { name: basename(file), base64: readFileSync(file).toString("base64") });
       await api.request(subPath(ref, "comments"), "POST", { body: [body(flags), attachment.markdown].filter(Boolean).join("\n\n"), author: val(flags, "author") ?? "Agent" });
-      warnMissingAuthor(flags);
       data = attachment;
     } else if (action === "share") {
       const current = await api.request(issuePath(required(ref, "Issue \u5F15\u7528")));
       data = await api.request(`/api/links?ref=${encodeURIComponent(current.issue.id)}`);
     } else throw new Error("\u672A\u77E5 Issue \u547D\u4EE4\u3002\u8FD0\u884C local-issues --help \u67E5\u770B\u7528\u6CD5\u3002");
-  } else if (command === "comment" && action === "edit") data = await api.request(`/api/comments/${encodeURIComponent(required(ref, "\u8BC4\u8BBA ID"))}`, "PATCH", { body: required(body(flags), "\u8BC4\u8BBA\u6B63\u6587\uFF08--body \u6216 --body-file\uFF09") });
+  } else if (command === "comment" && action === "edit") data = await api.request(`/api/comments/${encodeURIComponent(required(ref, "\u8BC4\u8BBA ID"))}`, "PATCH", { body: required(body(flags), "\u8BC4\u8BBA\u6B63\u6587\uFF08--body \u6216 --body-file\uFF09"), ...val(flags, "author") !== void 0 ? { author: val(flags, "author") } : {} });
   else if (command === "comment" && action === "delete") data = await api.request(`/api/comments/${encodeURIComponent(required(ref, "\u8BC4\u8BBA ID"))}`, "DELETE");
   else if (command === "resolve") data = await api.request(`/api/resolve?ref=${encodeURIComponent(required(action, "\u53CC\u94FE\u6216\u5F15\u7528"))}`);
   else if (command === "api") {

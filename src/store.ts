@@ -280,13 +280,13 @@ export class Store implements IssueStore {
       return this.writeTimeline(this.pickIssue(await this.snapshot(), ref), 'comment', body, fieldText(author, '作者').trim() || this.author);
     });
   }
-  async editComment(id: string, body: string, expectedUpdatedAt?: string): Promise<TimelineEntry> {
+  async editComment(id: string, body: string, expectedUpdatedAt?: string, author?: string): Promise<TimelineEntry> {
     return this.mutate(async () => {
       if (!fieldText(body, '评论').trim()) throw new Error('评论不能为空');
       const old = unique((await this.snapshot()).timeline.filter(c => c.id === id && c.kind === 'comment'), '评论'); this.conflict(old, expectedUpdatedAt);
-      const value = { ...old, body, updatedAt: this.now() };
+      const value = { ...old, body, ...(author !== undefined ? { author: fieldText(author, '作者').trim() || this.author } : {}), updatedAt: this.now() };
       const previousRaw = await this.adapter.read(value.path); this.conflict({ updatedAt: '', revision: revision(previousRaw) }, old.revision);
-      const raw = markdown({ updatedAt: value.updatedAt }, body, parse(previousRaw));
+      const raw = markdown({ updatedAt: value.updatedAt, ...(author !== undefined ? { author: value.author } : {}) }, body, parse(previousRaw));
       await this.adapter.write(value.path, raw, previousRaw); return { ...value, revision: revision(raw) };
     });
   }

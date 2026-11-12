@@ -267,7 +267,7 @@ export async function startApi(options: ApiOptions): Promise<{ close: () => Prom
           if (!entry) throw new HttpError(403, '此评论不属于分享的 Issue。', 'FORBIDDEN');
           const body = await readBody(req);
           if (method === 'DELETE') { await store.deleteComment(entry.id, expected(req, body)); data = { deleted: true }; }
-          else data = await store.editComment(entry.id, str(body.body, 'body'), expected(req, body));
+          else data = await store.editComment(entry.id, str(body.body, 'body'), expected(req, body), typeof body.author === 'string' ? body.author : typeof body.actor === 'string' ? body.actor : undefined);
         } else throw new HttpError(404, '分享接口不存在。', 'NOT_FOUND');
       } else if (parts[1] === 'links' && parts.length === 2 && method === 'GET') {
         const path = await routes.path(store, url.searchParams.get('ref') ?? undefined, url.searchParams.get('scope') === 'issues' ? 'issues' : undefined);
@@ -319,7 +319,7 @@ export async function startApi(options: ApiOptions): Promise<{ close: () => Prom
           } else throw new HttpError(404, 'Issue 接口不存在。', 'NOT_FOUND');
         } else throw new HttpError(404, 'Issue 接口不存在。', 'NOT_FOUND');
       } else if (parts[1] === 'comments' && parts.length === 3 && method === 'PATCH') {
-        const body = await readBody(req); data = await store.editComment(parts[2], str(body.body, 'body'), expected(req, body));
+        const body = await readBody(req); data = await store.editComment(parts[2], str(body.body, 'body'), expected(req, body), typeof body.author === 'string' ? body.author : typeof body.actor === 'string' ? body.actor : undefined);
       } else if (parts[1] === 'comments' && parts.length === 3 && method === 'DELETE') {
         const body = await readBody(req); await store.deleteComment(parts[2], expected(req, body)); data = { deleted: true };
       } else if (parts[1] === 'open' && parts.length === 2 && method === 'POST' && options.open) {
