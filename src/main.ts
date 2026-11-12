@@ -1,4 +1,4 @@
-import { App, FileSystemAdapter, Notice, Platform, Plugin, PluginSettingTab, Setting, TFile, normalizePath, requestUrl } from 'obsidian';
+import { App, FileSystemAdapter, Notice, Platform, Plugin, PluginSettingTab, Setting, TFile, normalizePath, requestUrl, type WorkspaceLeaf } from 'obsidian';
 import { MobileModal } from './mobile';
 import { randomUUID } from './platform-crypto';
 import { DraftJournal } from './draft-journal';
@@ -9,6 +9,7 @@ import { ResourceRoutes, slug } from './routes';
 import { Store } from './store';
 import type { startApi } from './api';
 import { IssuesView, VIEW_TYPE, type ViewHost } from './view';
+import type { HistoryDirection } from './trackpad-navigation';
 import { suppressTooltips } from './tooltips';
 import type { VaultAdapter } from './types';
 import { layoutPreferences, type LayoutPreferences } from './layout-preferences';
@@ -24,8 +25,9 @@ interface Settings {
   cliNodePath?: string;
   draftStorageId?: string;
   layout?: LayoutPreferences;
+  trackpadNavigation: boolean;
 }
-const DEFAULTS: Settings = { root: 'Local Issues', author: '我', apiEnabled: false, port: 27183, shares: {} };
+const DEFAULTS: Settings = { root: 'Local Issues', author: '我', apiEnabled: false, port: 27183, shares: {}, trackpadNavigation: true };
 
 export default class LocalIssuesPlugin extends Plugin implements ViewHost {
   declare settings: Settings;
@@ -48,6 +50,7 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
   private desktop?: Promise<typeof import('./desktop')>;
   private layoutSave: Promise<void> = Promise.resolve();
   get author(): string { return this.settings.author; }
+  get trackpadNavigation(): boolean { return this.settings.trackpadNavigation; }
   get layout(): LayoutPreferences { return this.settings.layout || {}; }
   async saveLayout(patch: Partial<LayoutPreferences>): Promise<void> {
     this.layoutSave = this.layoutSave.catch(() => {}).then(async () => {
@@ -86,6 +89,15 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
     this.addRibbonIcon('list-todo', 'Local Issues：项目', () => { void this.activate().catch(this.report); });
     this.addCommand({ id: 'open-projects', name: '打开项目', callback: () => { void this.activate().catch(this.report); } });
     this.addCommand({ id: 'open-local-issues', name: '打开 Local Issues', callback: () => { void this.activate().catch(this.report); } });
+    for (const direction of ['back', 'forward'] as const) this.addCommand({
+      id: `history-${direction}`, name: direction === 'back' ? '返回上一页' : '前进下一页',
+      checkCallback: checking => {
+        const leaf = this.app.workspace.activeLeaf;
+        if (!(leaf?.view instanceof IssuesView)) return false;
+        if (!checking) this.navigateHistory(leaf, direction);
+        return true;
+      },
+    });
     if (this.desktopAvailable) {
       this.addCommand({ id: 'copy-skill', name: '复制 Agent Skill', callback: () => { void this.copySkill(); } });
       this.addCommand({ id: 'copy-guide', name: '复制给 Agent 的引导语（含 skill 安装说明）', callback: () => { void this.copyGuide(); } });
@@ -188,6 +200,13 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
 
   async openNote(path: string): Promise<void> {
     await this.app.workspace.openLinkText(path, '', 'tab');
+  }
+
+  navigateHistory(leaf: WorkspaceLeaf, direction: HistoryDirection): void {
+    this.app.workspace.setActiveLeaf(leaf, { focus: true });
+    const commands = (this.app as App & { commands?: { executeCommandById(id: string): boolean } }).commands;
+    const ran = commands?.executeCommandById(direction === 'back' ? 'app:go-back' : 'app:go-forward');
+    if (!ran) new Notice(direction === 'back' ? '当前没有可返回的页面' : '当前没有可前进的页面');
   }
 
   openSettings(): void {
@@ -386,6 +405,26 @@ class LocalIssuesSettings extends PluginSettingTab {
         if (!v || v.startsWith('/') || v.includes('\\') || v.split('/').some(s => !s || s === '.' || s === '..' || s.startsWith('.'))) return;
         p.settings.root = v; await p.saveSettings();
       }));
+    if (Platform.isMacOS) {
+      new Setting(el).setName('触控板双指导航').setDesc('在 Local Issues 页面双指向右滑返回、向左滑前进；输入和横向滚动时不会触发。')
+        .addToggle(t => t.setValue(p.settings.trackpadNavigation).onChange(async value => { p.settings.trackpadNavigation = value; await p.saveSettings(); }));
+      const guide = el.createDiv({ cls: 'li-gesture-guide' });
+      for (const direction of ['back', 'forward'] as const) {
+        const back = direction === 'back';
+        const card = guide.createDiv({ cls: 'li-gesture-card' });
+        const visual = card.createDiv({ cls: `li-gesture-visual is-${direction}` });
+        visual.setAttribute('role', 'img');
+        visual.setAttribute('aria-label', back ? '两根手指在触控板上向右滑动，返回上一页' : '两根手指在触控板上向左滑动，前进到下一页');
+        visual.createSpan({ cls: 'li-gesture-arrow', text: back ? '←' : '→' }).setAttribute('aria-hidden', 'true');
+        const trackpad = visual.createDiv({ cls: 'li-gesture-trackpad' });
+        trackpad.setAttribute('aria-hidden', 'true');
+        const fingers = trackpad.createDiv({ cls: 'li-gesture-fingers' });
+        fingers.createSpan({ cls: 'li-gesture-finger' }); fingers.createSpan({ cls: 'li-gesture-finger' });
+        card.createEl('strong', { text: back ? '双指向右滑 · 后退' : '双指向左滑 · 前进' });
+        card.createEl('p', { text: back ? '回到刚才查看的项目或议题' : '返回刚才离开的页面', cls: 'setting-item-description' });
+      }
+      el.createEl('p', { text: '键盘操作：在 Obsidian 的「快捷键」中搜索 Local Issues，可为「返回上一页」「前进下一页」设置喜欢的组合键；命令面板也可直接执行。', cls: 'setting-item-description' });
+    }
     if (!p.desktopAvailable) {
       el.createEl('p', { text: '项目、议题、评论和附件保存在当前笔记库，可沿用笔记库的同步方式在设备间读写。', cls: 'setting-item-description' });
       return;

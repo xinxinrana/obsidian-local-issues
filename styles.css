@@ -251,6 +251,22 @@ body:has(.li-no-tooltips:hover) .tooltip,
 
 .li-settings { scrollbar-width: none; }
 .li-settings::-webkit-scrollbar { display: none; }
+.li-gesture-guide { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 4px 0 16px; }
+.li-gesture-card { min-width: 0; padding: 14px; border: 1px solid var(--background-modifier-border); border-radius: var(--radius-m); background: var(--background-secondary); }
+.li-gesture-card > strong { display: block; margin-top: 10px; }
+.li-gesture-card > p { margin: 4px 0 0; }
+.li-gesture-visual { position: relative; display: flex; align-items: center; justify-content: center; height: 92px; overflow: hidden; border-radius: var(--radius-s); background: var(--background-primary); }
+.li-gesture-arrow { position: absolute; top: 8px; inset-inline-end: 14px; color: var(--text-accent); font-size: 25px; line-height: 1; }
+.li-gesture-visual.is-back .li-gesture-arrow { inset-inline: 14px auto; }
+.li-gesture-trackpad { position: relative; width: 112px; height: 62px; margin-top: 14px; border: 2px solid var(--text-muted); border-radius: 9px; box-shadow: inset 0 0 0 1px var(--background-modifier-border); }
+.li-gesture-fingers { position: absolute; display: flex; gap: 10px; top: 17px; left: 50%; margin-left: -19px; }
+.li-gesture-finger { width: 14px; height: 25px; border-radius: 9px; background: var(--interactive-accent); box-shadow: 0 2px 5px var(--background-modifier-box-shadow); }
+.is-back .li-gesture-fingers { animation: li-gesture-back 2.4s ease-in-out infinite; }
+.is-forward .li-gesture-fingers { animation: li-gesture-forward 2.4s ease-in-out infinite; }
+@keyframes li-gesture-back { 0%, 15% { transform: translateX(-18px); opacity: .35; } 35% { opacity: 1; } 75%, 100% { transform: translateX(18px); opacity: .35; } }
+@keyframes li-gesture-forward { 0%, 15% { transform: translateX(18px); opacity: .35; } 35% { opacity: 1; } 75%, 100% { transform: translateX(-18px); opacity: .35; } }
+@media (max-width: 600px) { .li-gesture-guide { grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: reduce) { .li-gesture-fingers { animation: none; } }
 
 .li-cli-progress { margin: 0 0 16px; }
 .li-cli-progress p { margin: 6px 0; overflow-wrap: anywhere; }

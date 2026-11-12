@@ -32,17 +32,19 @@ test('bundled plugin registers native entry points; Vault adapter, protocol, API
     },
     on: (_event: string, fn: () => void) => { events.push(fn); return fn; },
   };
-  const leaves: any[] = [], openedNotes: string[] = [];
+  const leaves: any[] = [], openedNotes: string[] = [], nativeCommands: string[] = [];
   let plugin: any;
   const app: any = {
     vault, metadataCache: { getFirstLinkpathDest: () => null }, savedData: { port: 0, apiEnabled: true, token: 'legacy-token', shares: { old: { ref: 'legacy', key: 'legacy-secret' } } },
+    commands: { executeCommandById: (id: string) => { nativeCommands.push(id); return true; } },
     workspace: {
-      onLayoutReady() {}, getActiveFile: () => null,
+      activeLeaf: null, onLayoutReady() {}, getActiveFile: () => null,
+      setActiveLeaf(leaf: any) { this.activeLeaf = leaf; },
       getLeavesOfType: () => leaves,
       getLeaf: () => {
         const leaf: any = { app, async setViewState(state: { type: string; state?: any }) { if (!leaf.view) { leaf.view = plugin.views.get(state.type)(leaf); leaves.push(leaf); await leaf.view.onOpen(); } await leaf.view.setState(state.state || {}, { history: false }); } }; return leaf;
       },
-      revealLeaf: async () => {}, openLinkText: async (p: string) => { openedNotes.push(p); },
+      revealLeaf: async (leaf: any) => { app.workspace.activeLeaf = leaf; }, openLinkText: async (p: string) => { openedNotes.push(p); },
     },
   };
   const built = await build({ entryPoints: ['src/main.ts'], bundle: true, write: false, minify: true, format: 'cjs', platform: 'browser', external: ['obsidian', 'node:*'], target: 'es2022', logLevel: 'silent' });
@@ -81,6 +83,12 @@ test('bundled plugin registers native entry points; Vault adapter, protocol, API
     await plugin.commands.find((c: any) => c.id === 'open-local-issues').callback();
     assert.equal(leaves.length, 1, '打开命令复用当前窗口');
     assert.equal(leaves[0].view.getState().issueId, i.id, '打开命令与侧栏图标一致，保留当前阅读位置');
+    for (const [id, native] of [['history-back', 'app:go-back'], ['history-forward', 'app:go-forward']]) {
+      const command = plugin.commands.find((c: any) => c.id === id);
+      assert.equal(command.checkCallback(true), true); command.checkCallback(false);
+      assert.equal(nativeCommands.at(-1), native);
+    }
+    assert.equal(app.workspace.activeLeaf, leaves[0]);
     await plugin.openNote(i.path); assert.equal(openedNotes[0], i.path);
     injectExternalEdit = true;
     await assert.rejects(plugin.store.updateIssue(i.id, { body: '不应覆盖' }, i.revision), /冲突/);
@@ -143,8 +151,17 @@ test('bundled plugin registers native entry points; Vault adapter, protocol, API
       },
       remove: async () => { removals++; },
     });
+    mock.Platform.isMacOS = true;
     plugin.openSettings(); assert.match(mock.modals.at(-1).contentEl.textContent, /本地 Agent API/);
     const settingsEl = mock.modals.at(-1).contentEl;
+    assert.match(settingsEl.textContent, /双指向右滑 · 后退/);
+    assert.match(settingsEl.textContent, /双指向左滑 · 前进/);
+    assert.equal(settingsEl.querySelectorAll('.li-gesture-visual[role=img]').length, 2);
+    const trackpadSetting = [...settingsEl.querySelectorAll('.setting-item')].find((item: any) => item.textContent.includes('触控板双指导航'));
+    const trackpadToggle = trackpadSetting.querySelector('input[type=checkbox]') as HTMLInputElement;
+    assert.equal(trackpadToggle.checked, true); trackpadToggle.checked = false; trackpadToggle.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 0)); assert.equal(plugin.settings.trackpadNavigation, false);
+    mock.Platform.isMacOS = false;
     const install = [...settingsEl.querySelectorAll('button')].find((button: any) => button.textContent === '安装 CLI') as HTMLButtonElement;
     assert.ok(install); assert.equal(settingsEl.querySelector('.li-cli-progress input'), null, 'No advanced Node controls before a failure');
     install.click(); install.click(); await new Promise(resolve => setTimeout(resolve, 0));

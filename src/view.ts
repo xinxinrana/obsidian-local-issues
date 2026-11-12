@@ -7,10 +7,11 @@ import { Drafts, type DraftEditor } from './drafts';
 import { issueOptions } from './issue-options';
 import { orderedProjects, moveProjectOrder, layoutPreferences, type LayoutPreferences } from './layout-preferences';
 import { pointerDrag } from './pointer-drag';
+import { trackpadNavigation, type HistoryDirection } from './trackpad-navigation';
 import { ISSUE_STATUSES, STATUS_NAMES, CLOSE_REASON_NAMES, issueLink, CloseReason, Issue, IssueInput, IssuePatch, IssueStore, Project, ProjectStatus, Snapshot, TimelineEntry } from './types';
 
 export const VIEW_TYPE = 'local-issues-view';
-export interface ViewHost { draftCache?: Drafts; store: IssueStore; author: string; layout?: LayoutPreferences; saveLayout?(patch: Partial<LayoutPreferences>): Promise<void>; openNote(path: string): Promise<void>; resourceLink(ref?: string, scope?: 'issues'): Promise<string>; openSettings(): void; }
+export interface ViewHost { draftCache?: Drafts; store: IssueStore; author: string; layout?: LayoutPreferences; saveLayout?(patch: Partial<LayoutPreferences>): Promise<void>; trackpadNavigation?: boolean; navigateHistory?(leaf: WorkspaceLeaf, direction: HistoryDirection): void; openNote(path: string): Promise<void>; resourceLink(ref?: string, scope?: 'issues'): Promise<string>; openSettings(): void; }
 const PROJECT_STATES: ProjectStatus[] = ['active', 'paused', 'completed', 'archived'];
 const el = <K extends keyof HTMLElementTagNameMap>(parent: HTMLElement, tag: K, cls = '', text = ''): HTMLElementTagNameMap[K] => { const node = document.createElement(tag); node.className = cls; if (text) node.textContent = text; parent.append(node); return node; };
 function prependIcon(parent: HTMLElement, name: string) { const icon = el(parent, 'span', 'li-icon'); setIcon(icon, name); icon.setAttribute('aria-hidden', 'true'); parent.prepend(icon); parent.addClass('li-with-icon'); }
@@ -87,6 +88,7 @@ export class IssuesView extends ItemView {
   private phone?: MobilePage;
   private leaveMobileEdit?: () => void;
   private disposeViewport?: () => void;
+  private disposeTrackpad?: () => void;
   constructor(leaf: WorkspaceLeaf, private host: ViewHost) { super(leaf); this.navigation = true; this.layout = layoutPreferences(host.layout); this.projectSort = this.layout.projectSort || 'updated'; this.scope = new Scope(this.app.scope); this.bindMarkdownShortcuts(this.scope); this.draftCache = host.draftCache || new Drafts({ read: () => undefined, write: () => {} }, message => { new Notice(message, 0); }); }
   private bindMarkdownShortcuts(scope: Scope) {
     for (const [modifiers, key, command] of MARKDOWN_SHORTCUTS) scope.register(modifiers as Modifier[], key.toUpperCase(), event => {
@@ -100,8 +102,16 @@ export class IssuesView extends ItemView {
   getViewType() { return VIEW_TYPE; }
   getDisplayText() { return 'Local Issues'; }
   getIcon() { return 'list-todo'; }
-  async onOpen() { this.closed = false; this.disposeViewport?.(); this.disposeViewport = observeMobileViewport(this.contentEl); suppressTooltips(this.contentEl); this.renderScope.load(); await this.refresh(); }
-  async onClose() { this.closed = true; ++this.generation; this.disposeViewport?.(); this.disposeViewport = undefined; this.deletePrompt?.close(); this.relationPicker?.close(); this.submissionNotice?.hide(); this.discardPrompt?.close(); this.stopEditing(); this.captureDrafts(); this.renderScope.unload(); }
+  async onOpen() {
+    this.closed = false; this.disposeViewport?.(); this.disposeViewport = observeMobileViewport(this.contentEl); suppressTooltips(this.contentEl);
+    this.disposeTrackpad?.();
+    if (Platform.isMacOS && !Platform.isMobile && this.host.navigateHistory) this.disposeTrackpad = trackpadNavigation(this.contentEl, {
+      enabled: () => this.host.trackpadNavigation !== false,
+      navigate: direction => this.host.navigateHistory!(this.leaf, direction),
+    });
+    this.renderScope.load(); await this.refresh();
+  }
+  async onClose() { this.closed = true; ++this.generation; this.disposeViewport?.(); this.disposeViewport = undefined; this.disposeTrackpad?.(); this.disposeTrackpad = undefined; this.deletePrompt?.close(); this.relationPicker?.close(); this.submissionNotice?.hide(); this.discardPrompt?.close(); this.stopEditing(); this.captureDrafts(); this.renderScope.unload(); }
   getState() { return { projectId: this.projectId, issueId: this.issueId, creating: this.creating, query: this.query, projectState: this.state, issueState: this.issueState, mode: this.mode, label: this.label, milestone: this.milestone, sort: this.sort, projectSort: this.projectSort, group: this.group }; }
   getEphemeralState() { return { scrollTop: (this.phone?.content || this.contentEl).scrollTop }; }
   setEphemeralState(state: { scrollTop?: number }) { if (typeof state?.scrollTop === 'number' && Number.isFinite(state.scrollTop)) (this.phone?.content || this.contentEl).scrollTop = Math.max(0, state.scrollTop); }
