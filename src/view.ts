@@ -104,11 +104,19 @@ export class IssuesView extends ItemView {
   getIcon() { return 'list-todo'; }
   async onOpen() {
     this.closed = false; this.disposeViewport?.(); this.disposeViewport = observeMobileViewport(this.contentEl); suppressTooltips(this.contentEl);
-    this.disposeTrackpad?.();
-    if (Platform.isMacOS && !Platform.isMobile && this.host.navigateHistory) this.disposeTrackpad = trackpadNavigation(this.contentEl, {
-      enabled: () => this.host.trackpadNavigation !== false,
-      navigate: direction => this.host.navigateHistory!(this.leaf, direction),
-    });
+    this.disposeTrackpad?.(); this.disposeTrackpad = undefined;
+    if (Platform.isMacOS && !Platform.isMobile && this.host.navigateHistory) {
+      const glow = this.containerEl.createDiv({ cls: 'li-trackpad-glow' }); glow.setAttribute('aria-hidden', 'true');
+      const dispose = trackpadNavigation(this.contentEl, {
+        enabled: () => this.host.trackpadNavigation !== false,
+        navigate: direction => this.host.navigateHistory!(this.leaf, direction),
+        feedback: (direction, progress) => {
+          glow.dataset.direction = direction || '';
+          glow.style.setProperty('--li-swipe-strength', String(progress));
+        },
+      });
+      this.disposeTrackpad = () => { dispose(); glow.remove(); };
+    }
     this.renderScope.load(); await this.refresh();
   }
   async onClose() { this.closed = true; ++this.generation; this.disposeViewport?.(); this.disposeViewport = undefined; this.disposeTrackpad?.(); this.disposeTrackpad = undefined; this.deletePrompt?.close(); this.relationPicker?.close(); this.submissionNotice?.hide(); this.discardPrompt?.close(); this.stopEditing(); this.captureDrafts(); this.renderScope.unload(); }

@@ -16,16 +16,16 @@ test('real view supports project → issue → Markdown comments, pasted and dro
   const dom = new JSDOM('<!doctype html><body></body>', { url: 'http://localhost', pretendToBeVisual: true });
   for (const name of ['document', 'window', 'HTMLElement', 'HTMLTextAreaElement', 'HTMLInputElement', 'HTMLLabelElement', 'HTMLSelectElement', 'Element', 'Node', 'Event', 'MouseEvent']) (globalThis as any)[name] = (dom.window as any)[name];
   mock.installDom(dom.window);
-  mock.notices.length = 0; mock.menus.length = 0;
+  mock.notices.length = 0; mock.menus.length = 0; mock.Platform.isMacOS = true;
   const files = new Map<string, string>(), binary = new Map<string, Uint8Array>();
   const adapter: VaultAdapter = { list: async () => [...files.keys()], read: async p => files.get(p)!,
     write: async (p, text, expectedRaw) => { if (expectedRaw !== undefined && files.get(p) !== expectedRaw) throw new Error('写入冲突'); files.set(p, text); }, exists: async p => files.has(p) || binary.has(p) || [...files.keys()].some(key => key.startsWith(p + '/')),
     writeBinary: async (p, bytes) => { binary.set(p, bytes); },
     rename: async (p, to) => { for (const [key, value] of [...files]) if (key === p || key.startsWith(p + '/')) { files.set(to + key.slice(p.length), value); files.delete(key); } },
     removeFolder: async p => { for (const key of [...files.keys()]) if (key.startsWith(`${p}/`)) files.delete(key); } };
-  const store = new Store(adapter), copied: string[] = [], opened: string[] = [], shared: string[] = [];
+  const store = new Store(adapter), copied: string[] = [], opened: string[] = [], shared: string[] = [], historyDirections: string[] = [];
   const app = { metadataCache: { getFirstLinkpathDest: () => null }, vault: { getMarkdownFiles: () => [...files.keys()].map(path => ({ path })) }, workspace: { openLinkText: async () => {} } };
-  const host = { store, author: 'Evan', commentSubmit: 'mod-enter', openNote: async (path: string) => { opened.push(path); }, resourceLink: async (ref?: string) => { shared.push(ref); return 'http://localhost:27183/local-issues/issues/5'; }, openSettings() {} };
+  const host = { store, author: 'Evan', commentSubmit: 'mod-enter', navigateHistory: (_leaf: any, direction: string) => { historyDirections.push(direction); }, openNote: async (path: string) => { opened.push(path); }, resourceLink: async (ref?: string) => { shared.push(ref); return 'http://localhost:27183/local-issues/issues/5'; }, openSettings() {} };
   const built = await build({ entryPoints: ['src/view.ts'], bundle: true, write: false, format: 'cjs', platform: 'node', external: ['obsidian'], logLevel: 'silent' });
   const module = { exports: {} as any };
   vm.runInNewContext(built.outputFiles[0].text, { module, exports: module.exports, require: (id: string) => id === 'obsidian' ? mock : require(id),
@@ -56,6 +56,15 @@ test('real view supports project → issue → Markdown comments, pasted and dro
   const uploading = (node: any) => node.closest('.li-editor').dataset.uploading;
   try {
     await view.onOpen(); assert.match(view.contentEl.textContent, /把想法变成项目/);
+    const glow = view.containerEl.querySelector<HTMLElement>('.li-trackpad-glow')!;
+    assert.ok(glow); assert.equal(glow.getAttribute('aria-hidden'), 'true');
+    view.contentEl.dispatchEvent(new dom.window.WheelEvent('wheel', { deltaX: -18, bubbles: true, cancelable: true }));
+    assert.equal(glow.dataset.direction, 'back'); assert.equal(glow.style.getPropertyValue('--li-swipe-strength'), '0.2');
+    view.contentEl.dispatchEvent(new dom.window.WheelEvent('wheel', { deltaX: -72, bubbles: true, cancelable: true }));
+    assert.equal(glow.style.getPropertyValue('--li-swipe-strength'), '1'); assert.deepEqual(historyDirections, ['back']);
+    view.contentEl.dispatchEvent(new dom.window.WheelEvent('wheel', { deltaY: 20, bubbles: true, cancelable: true }));
+    await new Promise(resolve => setTimeout(resolve, 200));
+    assert.equal(glow.dataset.direction, ''); assert.equal(glow.style.getPropertyValue('--li-swipe-strength'), '0');
     const hint = document.createElement('button'); hint.title = '重复提示'; hint.setAttribute('aria-label', '可访问名称');
     const hintIcon = document.createElement('span'); hint.append(hintIcon); view.contentEl.append(hint);
     let hovered = false; hint.addEventListener('mouseover', () => { hovered = true; });
@@ -526,5 +535,5 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     await until(() => !!deleteDialog(), '再次确认删除议题'); click('确认删除', deleteDialog()!);
     await until(async () => !(await store.snapshot()).issues.some(i => i.id === moving.id) && !deleteDialog(), '删除议题');
     await until(() => !view.getState().issueId, '删除后回到项目列表');
-  } finally { for (const modal of [...mock.modals]) modal.close(); await view.onClose(); dom.window.close(); }
+  } finally { for (const modal of [...mock.modals]) modal.close(); await view.onClose(); mock.Platform.isMacOS = false; dom.window.close(); }
 });

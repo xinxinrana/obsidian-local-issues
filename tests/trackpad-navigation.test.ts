@@ -9,12 +9,18 @@ function setup(enabled = true) {
   const content = dom.window.document.querySelector<HTMLElement>('#content')!;
   let time = 0;
   const directions: HistoryDirection[] = [];
-  const dispose = trackpadNavigation(root, { enabled: () => enabled, navigate: direction => directions.push(direction), now: () => time });
+  const feedback: { direction: HistoryDirection | null; progress: number }[] = [];
+  const dispose = trackpadNavigation(root, {
+    enabled: () => enabled,
+    navigate: direction => directions.push(direction),
+    feedback: (direction, progress) => feedback.push({ direction, progress }),
+    now: () => time,
+  });
   const wheel = (deltaX: number, deltaY = 0, target: HTMLElement = content) => {
     const event = new dom.window.WheelEvent('wheel', { deltaX, deltaY, bubbles: true, cancelable: true });
     target.dispatchEvent(event); return event;
   };
-  return { dom, root, content, directions, dispose, wheel, tick(ms: number) { time += ms; } };
+  return { dom, root, content, directions, feedback, dispose, wheel, tick(ms: number) { time += ms; } };
 }
 
 test('horizontal trackpad swipes navigate native history once per gesture', () => {
@@ -28,6 +34,29 @@ test('horizontal trackpad swipes navigate native history once per gesture', () =
     assert.deepEqual(f.directions, ['back'], 'momentum does not navigate twice');
     f.tick(1000); f.wheel(100);
     assert.deepEqual(f.directions, ['back', 'forward']);
+  } finally { f.dispose(); f.dom.window.close(); }
+});
+
+test('edge feedback follows finger direction and brightness, then fades after the gesture', () => {
+  const f = setup();
+  try {
+    f.wheel(-18);
+    assert.deepEqual(f.feedback.at(-1), { direction: 'back', progress: 0.2 });
+    f.tick(20); f.wheel(-36);
+    assert.deepEqual(f.feedback.at(-1), { direction: 'back', progress: 0.6 });
+    f.tick(20); f.wheel(-36);
+    assert.deepEqual(f.feedback.at(-1), { direction: 'back', progress: 1 });
+    assert.deepEqual(f.directions, ['back']);
+    f.tick(30); f.wheel(-100);
+    assert.deepEqual(f.feedback.at(-1), { direction: 'back', progress: 1 }, 'momentum keeps the completed glow visible');
+    f.tick(200); f.wheel(0, 20);
+    assert.deepEqual(f.feedback.at(-1), { direction: null, progress: 0 }, 'idle or vertical scrolling fades the glow');
+    f.tick(1000); f.wheel(30);
+    assert.deepEqual(f.feedback.at(-1), { direction: 'forward', progress: 1 / 3 });
+    f.tick(20); f.wheel(60);
+    assert.deepEqual(f.feedback.at(-1), { direction: 'forward', progress: 1 });
+    f.dispose();
+    assert.deepEqual(f.feedback.at(-1), { direction: null, progress: 0 }, 'view cleanup also clears feedback');
   } finally { f.dispose(); f.dom.window.close(); }
 });
 

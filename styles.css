@@ -12,6 +12,12 @@ body:has(.li-no-tooltips:hover) .tooltip,
 }
 .local-issues *, .li-modal-container * { box-sizing: border-box; }
 .local-issues [hidden] { display: none !important; }
+.workspace-leaf-content[data-type="local-issues-view"] { position: relative; }
+.li-trackpad-glow { position: absolute; inset: 0; z-index: 30; overflow: hidden; border-radius: inherit; pointer-events: none; }
+.li-trackpad-glow::before, .li-trackpad-glow::after { content: ''; position: absolute; top: 0; bottom: 0; width: 140px; opacity: 0; transition: opacity 90ms ease-out; }
+.li-trackpad-glow::before { left: 0; background: linear-gradient(90deg, var(--interactive-accent), transparent); }
+.li-trackpad-glow::after { right: 0; background: linear-gradient(-90deg, var(--interactive-accent), transparent); }
+.li-trackpad-glow[data-direction="back"]::before, .li-trackpad-glow[data-direction="forward"]::after { opacity: calc(var(--li-swipe-strength, 0) * .24); }
 .local-issues .li-shell { width: 100%; max-width: 1440px; margin-inline: auto; padding: 20px 28px 36px; }
 .local-issues :is(h1,h2,h3,p) { margin: 0; }
 .local-issues :is(h1,h2,h3) { color: var(--text-normal); line-height: 1.35; }
