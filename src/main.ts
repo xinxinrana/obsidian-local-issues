@@ -1,4 +1,4 @@
-import { App, FileSystemAdapter, Notice, Platform, Plugin, PluginSettingTab, Setting, TFile, normalizePath, requestUrl, type WorkspaceLeaf } from 'obsidian';
+import { App, FileSystemAdapter, Notice, Platform, Plugin, PluginSettingTab, Setting, setIcon, TFile, normalizePath, requestUrl, type WorkspaceLeaf } from 'obsidian';
 import { MobileModal } from './mobile';
 import { randomUUID } from './platform-crypto';
 import { DraftJournal } from './draft-journal';
@@ -392,29 +392,67 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
 
 class LocalIssuesSettings extends PluginSettingTab {
   private cliCleanup?: () => void;
+  private activeTab = 'general';
   hide(): void { this.cliCleanup?.(); this.cliCleanup = undefined; }
   constructor(app: App, private plugin: LocalIssuesPlugin) { super(app, plugin); }
   display(): void {
     const { containerEl: el, plugin: p } = this; el.empty(); suppressTooltips(el);
     el.addClass('li-settings');
-    new Setting(el).setName('打开项目').setDesc('项目、Issues、评论和看板。').addButton(b => b.setButtonText('打开').setCta().onClick(() => p.activate()));
-    new Setting(el).setName('显示名称').setDesc('新建 Issue、评论和状态记录的默认作者。').addText(t => t.setValue(p.settings.author).onChange(async value => {
+    const header = el.createDiv({ cls: 'li-settings-header' });
+    const brand = header.createDiv({ cls: 'li-settings-brand' });
+    setIcon(brand.createDiv({ cls: 'li-settings-logo' }), 'list-todo');
+    const identity = brand.createDiv();
+    identity.createEl('strong', { text: 'Local Issues' });
+    identity.createSpan({ cls: 'li-settings-version', text: p.manifest.version });
+    const open = header.createEl('button', { cls: 'mod-cta', text: '打开项目' });
+    open.addEventListener('click', () => { void p.activate(); });
+    const nav = el.createDiv({ cls: 'li-settings-nav' });
+    nav.setAttribute('role', 'tablist');
+    nav.setAttribute('aria-label', '设置分类');
+    const panels = el.createDiv({ cls: 'li-settings-panels' });
+    const sections: Record<string, HTMLElement> = {};
+    for (const [id, title, icon] of [['general', '常规', 'sliders-horizontal'], ['interaction', '操作', 'keyboard'], ...(p.desktopAvailable ? [['agent', 'Agent', 'bot']] : [])]) {
+      const button = nav.createEl('button', { cls: 'li-settings-tab' });
+      setIcon(button.createSpan(), icon);
+      button.createSpan({ text: title });
+      button.setAttribute('role', 'tab');
+      const panel = panels.createDiv({ cls: 'li-settings-panel' });
+      panel.setAttribute('role', 'tabpanel');
+      panel.setAttribute('aria-label', title);
+      sections[id] = panel;
+      button.addEventListener('click', () => {
+        this.activeTab = id;
+        for (const [key, section] of Object.entries(sections)) section.hidden = key !== id;
+        for (const tab of Array.from(nav.children)) {
+          const selected = tab === button;
+          tab.classList.toggle('is-active', selected);
+          tab.setAttribute('aria-selected', String(selected));
+        }
+      });
+      button.classList.toggle('is-active', this.activeTab === id);
+      button.setAttribute('aria-selected', String(this.activeTab === id));
+      panel.hidden = this.activeTab !== id;
+    }
+    const general = sections.general.createDiv({ cls: 'li-settings-card' });
+    const interaction = sections.interaction.createDiv({ cls: 'li-settings-card' });
+    new Setting(general).setName('显示名称').setDesc('新建 Issue、评论和状态记录的默认作者。').addText(t => t.setValue(p.settings.author).onChange(async value => {
       p.settings.author = value.trim() || '我'; p.store.author = p.settings.author; await p.saveSettings();
     }));
-    new Setting(el).setName('笔记目录').setDesc(`当前目录：${p.settings.root}。修改后重启 Obsidian 生效；已有笔记不会迁移。`)
+    new Setting(general).setName('笔记目录').setDesc('修改后重启 Obsidian 生效，已有笔记保留在原目录。')
       .addText(t => t.setValue(p.settings.root).onChange(async value => {
         const v = value.trim().replace(/\/$/, '');
         if (!v || v.startsWith('/') || v.includes('\\') || v.split('/').some(s => !s || s === '.' || s === '..' || s.startsWith('.'))) return;
         p.settings.root = v; await p.saveSettings();
       }));
-    new Setting(el).setName('评论发布快捷键').setDesc('选择「回车发表」时，Enter 发表、Shift+Enter 换行；选择「快捷键发表」时，⌘/Ctrl+Enter 发表、Enter 换行。')
+    sections.general.createEl('p', { text: '本地 Markdown · 随笔记库同步', cls: 'setting-item-description' });
+    new Setting(interaction).setName('评论发布快捷键').setDesc('选择「回车发表」时，Enter 发表、Shift+Enter 换行；选择「快捷键发表」时，⌘/Ctrl+Enter 发表、Enter 换行。')
       .addDropdown(d => d.addOption('mod-enter', '快捷键发表（⌘/Ctrl+Enter）').addOption('enter', '回车发表（Enter）').setValue(p.settings.commentSubmit).onChange(async value => {
         p.settings.commentSubmit = value === 'enter' ? 'enter' : 'mod-enter'; await p.saveSettings();
       }));
     if (Platform.isMacOS) {
-      new Setting(el).setName('触控板双指导航').setDesc('在 Local Issues 页面双指向右滑返回、向左滑前进；输入和横向滚动时不会触发。')
+      new Setting(interaction).setName('触控板双指导航').setDesc('在 Local Issues 页面双指向右滑返回、向左滑前进；输入和横向滚动时不会触发。')
         .addToggle(t => t.setValue(p.settings.trackpadNavigation).onChange(async value => { p.settings.trackpadNavigation = value; await p.saveSettings(); }));
-      const guide = el.createDiv({ cls: 'li-gesture-guide' });
+      const guide = sections.interaction.createDiv({ cls: 'li-gesture-guide' });
       for (const direction of ['back', 'forward'] as const) {
         const back = direction === 'back';
         const card = guide.createDiv({ cls: 'li-gesture-card' });
@@ -429,24 +467,22 @@ class LocalIssuesSettings extends PluginSettingTab {
         card.createEl('strong', { text: back ? '双指向右滑 · 后退' : '双指向左滑 · 前进' });
         card.createEl('p', { text: back ? '回到刚才查看的项目或议题' : '返回刚才离开的页面', cls: 'setting-item-description' });
       }
-      el.createEl('p', { text: '键盘操作：在 Obsidian 的「快捷键」中搜索 Local Issues，可为「返回上一页」「前进下一页」设置喜欢的组合键；命令面板也可直接执行。', cls: 'setting-item-description' });
+      sections.interaction.createEl('p', { text: '键盘操作：在 Obsidian 的「快捷键」中搜索 Local Issues，可为「返回上一页」「前进下一页」设置喜欢的组合键；命令面板也可直接执行。', cls: 'setting-item-description' });
     }
-    if (!p.desktopAvailable) {
-      el.createEl('p', { text: '项目、议题、评论和附件保存在当前笔记库，可沿用笔记库的同步方式在设备间读写。', cls: 'setting-item-description' });
-      return;
-    }
-    new Setting(el).setName('本地 Agent API').setDesc('仅监听 127.0.0.1，供 CLI 和分享链接读写当前笔记库。')
+    if (!p.desktopAvailable) return;
+    const agent = sections.agent.createDiv({ cls: 'li-settings-card' });
+    new Setting(agent).setName('本地 Agent API').setDesc('仅监听 127.0.0.1，供 CLI 和分享链接读写当前笔记库。')
       .addToggle(t => t.setValue(p.settings.apiEnabled).onChange(async value => { p.settings.apiEnabled = value; await p.saveSettings(); await p.restartApi(); this.display(); }));
-    new Setting(el).setName('API 端口').setDesc(p.apiError || `http://127.0.0.1:${p.settings.port}`)
+    new Setting(agent).setName('API 端口').setDesc(p.apiError || `http://127.0.0.1:${p.settings.port}`)
       .addText(t => t.setValue(String(p.settings.port)).onChange(async value => {
         if (!/^\d+$/.test(value) || +value < 1024 || +value > 65535) return;
         p.settings.port = +value; await p.saveSettings();
       })).addButton(b => b.setButtonText('应用端口').onClick(async () => { await p.restartApi(); this.display(); }));
-    const cli = new Setting(el).setName('Agent CLI').setDesc('安装后，Agent 可在终端直接使用 local-issues。');
+    const cli = new Setting(agent).setName('Agent CLI').setDesc('安装后，Agent 可在终端直接使用 local-issues。');
     let install!: HTMLButtonElement, remove!: HTMLButtonElement;
     cli.addButton(b => { install = b.buttonEl; b.setButtonText('安装 CLI').setCta().onClick(() => { void p.installCli().catch(() => {}); }); })
       .addButton(b => { remove = b.buttonEl; b.setButtonText('卸载 CLI').onClick(() => { void p.removeCli().catch(() => {}); }); });
-    const progress = el.createDiv({ cls: 'li-cli-progress' }); progress.setAttribute('aria-live', 'polite');
+    const progress = sections.agent.createDiv({ cls: 'li-cli-progress' }); progress.setAttribute('aria-live', 'polite');
     const renderCli = () => {
       install.disabled = remove.disabled = p.cliBusy;
       install.textContent = p.cliBusy ? '处理中…' : p.cliInstalled ? '修复安装' : '安装 CLI';
@@ -467,9 +503,9 @@ class LocalIssuesSettings extends PluginSettingTab {
       else if (!p.cliProgress.length) progress.createEl('p', { text: p.cliInstalled ? 'CLI 命令已安装。' : '点击安装，将检查运行环境并补齐所需文件。', cls: 'setting-item-description' });
     };
     this.cliCleanup?.(); this.cliCleanup = p.onCliChange(renderCli); renderCli(); void p.refreshCliStatus();
-    new Setting(el).setName('Agent 接入').setDesc('复制引导语交给 Agent，或将 Skill 保存到 Agent 的技能目录。')
+    new Setting(agent).setName('Agent 接入').setDesc('复制引导语交给 Agent，或将 Skill 保存到 Agent 的技能目录。')
       .addButton(b => b.setButtonText('复制引导语').onClick(() => p.copyGuide()))
       .addButton(b => b.setButtonText('复制 Skill').onClick(() => p.copySkill()));
-    el.createEl('p', { text: '内容保存在 Markdown 文件中，附件位于 resource/local-issues/。停用插件后仍可直接阅读与编辑。链接用于定位仓库、项目或议题，无需登录或密钥，仅在这台电脑的 Obsidian 运行时可用。', cls: 'setting-item-description' });
+    sections.agent.createEl('p', { text: '内容保存在 Markdown 文件中，附件位于 resource/local-issues/。停用插件后仍可直接阅读与编辑。链接用于定位仓库、项目或议题，无需登录或密钥，仅在这台电脑的 Obsidian 运行时可用。', cls: 'setting-item-description' });
   }
 }
