@@ -2,6 +2,27 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { request as httpRequest } from 'node:http';
 import { fixture } from './api-fixture';
+import manifest from '../manifest.json';
+
+test('move and delete APIs preserve comments, reject stale writes and redirect old browser links', async () => {
+  const f = await fixture();
+  try {
+    const a = await f.store.createProject({ title: 'From' }), b = await f.store.createProject({ title: 'To' });
+    const issue = await f.store.createIssue(a.id, { title: 'Move me' });
+    const comment = await f.store.addComment(issue.id, 'Comment');
+    assert.equal((await f.request(`/api/issues/${issue.id}/move`, 'POST', { project: b.id }, { 'If-Match': 'stale' })).status, 409);
+    const moved = await f.request(`/api/issues/${issue.id}/move`, 'POST', { project: b.id }, { 'If-Match': issue.revision! });
+    assert.equal(moved.status, 200); assert.equal(moved.data.projectId, b.id);
+    assert.equal((await f.request(`/api/issues/${issue.id}`)).data.comments[0].id, comment.id);
+    const old = await fetch(f.url + '/from/issues/1', { headers: { Accept: 'text/html' }, redirect: 'manual' });
+    assert.equal(old.status, 302); assert.equal(old.headers.get('location'), '/to/issues/1');
+    assert.equal((await f.request('/from/issues/1')).data.issue.id, issue.id);
+    assert.equal((await f.request(`/api/issues/${issue.id}`, 'DELETE', {}, { 'If-Match': issue.revision! })).status, 409);
+    assert.equal((await f.request(`/api/issues/${issue.id}`, 'DELETE', {}, { 'If-Match': moved.data.revision })).data.deleted, true);
+    assert.equal((await f.request('/api/issues')).data.length, 0);
+    assert.equal((await f.request(`/api/issues/${issue.id}`)).status, 404);
+  } finally { await f.close(); }
+});
 
 test('API uses Markdown store for project → issue → comments, edits and state history', async () => {
   const f = await fixture();
@@ -14,10 +35,13 @@ test('API uses Markdown store for project → issue → comments, edits and stat
     const comment = await f.request(`/api/issues/${id}/comments`, 'POST', { body: '第一条 **评论** [[设计稿]]', author: 'Agent A' });
     const second = await f.request(`/api/issues/${id}/comments`, 'POST', { body: '第二条评论' });
     assert.equal(second.status, 201);
-    assert.equal((await f.request(`/api/comments/${comment.data.id}`, 'PATCH', { body: '修改后的评论' })).data.body, '修改后的评论');
-    const fixedAuthor = await f.request(`/api/comments/${comment.data.id}`, 'PATCH', { body: '修改后的评论', author: 'WorkBuddy' });
-    assert.equal(fixedAuthor.data.author, 'WorkBuddy');
-    assert.equal((await f.request(`/api/comments/${comment.data.id}`, 'PATCH', { body: '再改正文' })).data.author, 'WorkBuddy');
+    const corrected = await f.request(`/api/comments/${comment.data.id}`, 'PATCH', { body: '修改后的评论', author: 'WorkBuddy' });
+    assert.equal(corrected.data.body, '修改后的评论');
+    assert.equal(corrected.data.author, 'WorkBuddy');
+    const preserved = await f.request(`/api/comments/${comment.data.id}`, 'PATCH', { body: '保留作者的评论', actor: undefined });
+    assert.equal(preserved.data.author, 'WorkBuddy');
+    const viaActor = await f.request(`/api/comments/${comment.data.id}`, 'PATCH', { body: '保留作者的评论', actor: 'CLI Agent' });
+    assert.equal(viaActor.data.author, 'CLI Agent');
     const closed = await f.request(`/api/issues/${id}/close`, 'POST', { closeReason: 'on-hold' }); assert.equal(closed.data.status, 'closed'); assert.equal(closed.data.closeReason, 'on-hold');
     assert.equal((await f.request(`/api/issues/${id}/reopen`, 'POST')).data.status, 'open');
     const detail = await f.request(`/api/issues/${id}`);
@@ -41,7 +65,7 @@ test('API loopback Host, browser rejection and legacy target routes', async () =
   const f = await fixture();
   try {
     const health = await fetch(`${f.url}/api/health`); assert.equal(health.status, 200);
-    assert.deepEqual(await health.json(), { ok: true, data: { name: 'Local Issues', version: '0.2.5' } });
+    assert.deepEqual(await health.json(), { ok: true, data: { name: 'Local Issues', version: manifest.version } });
     assert.equal((await fetch(`${f.url}/api/projects`)).status, 200);
     const invalidHost = await new Promise<number>((resolve, reject) => {
       const req = httpRequest(`${f.url}/api/projects`, { headers: { Host: 'evil.test' } }, res => { res.resume(); resolve(res.statusCode!); }); req.on('error', reject); req.end();

@@ -42,17 +42,21 @@ test('CLI gh-style lifecycle, JSON selection, stdin, files, attachments and shar
     const anonymous = await run(['issue', 'comment', '1', '-P', project.id, '-b', '没有身份的评论']);
     assert.equal(anonymous.code, 0, 'an anonymous comment is still posted');
     assert.match(anonymous.stderr, /没有身份标签/, 'but the CLI warns loudly');
+    assert.match(anonymous.stderr.split('\n')[0], /^警告：.*--author/, 'the warning is the first stderr line');
     assert.match(anonymous.stderr, /--author/, 'and says how to fix it');
     const commentId = anonymous.stdout.trim();
     assert.match(commentId, /^c-[\da-f-]+$/, 'stdout is just the comment id, so it can be fed back to comment delete');
     const removed = await run(['comment', 'delete', commentId, '--json']); assert.equal(removed.code, 0, removed.stderr);
-    await json(['comment', 'edit', one.id, '-b', 'Edited comment']);
+    await json(['comment', 'edit', one.id, '-b', 'Edited comment', '--author', 'WorkBuddy']);
+    assert.equal((await f.store.snapshot()).timeline.find(t => t.id === one.id)?.author, 'WorkBuddy');
+    await json(['comment', 'edit', one.id, '-b', 'Edited again']);
+    assert.equal((await f.store.snapshot()).timeline.find(t => t.id === one.id)?.author, 'WorkBuddy');
     await json(['issue', 'close', '1', '-P', project.id, '--reason', 'not-planned']); assert.equal((await f.store.getIssue(created.id)).closeReason, 'not-planned');
     await json(['issue', 'reopen', '1', '-P', project.id]);
     const selected = await run(['issue', 'view', '1', '-P', project.id, '--json', 'number,title,comments']);
     assert.equal(selected.code, 0, selected.stderr);
     assert.deepEqual(Object.keys(JSON.parse(selected.stdout)), ['number', 'title', 'comments']);
-    assert.equal(JSON.parse(selected.stdout).comments[0].body, 'Edited comment');
+    assert.equal(JSON.parse(selected.stdout).comments[0].body, 'Edited again');
     const list = await json(['issue', 'list', '-P', 'CLI 项目', '--label', 'bug', '--state', 'all']); assert.equal(list.length, 1);
     await json(['issue', 'edit', created.id, '--add-label', 'new', '--remove-label', 'ux']);
     assert.deepEqual((await f.store.getIssue(created.id)).labels, ['bug', 'new']);
@@ -167,5 +171,14 @@ test('CLI gh-style lifecycle, JSON selection, stdin, files, attachments and shar
     const removable = await json(['issue', 'comment', created.id, '-b', '可删除评论']);
     assert.equal((await json(['comment', 'delete', removable.id])).deleted, true);
     assert.ok(!(await f.store.snapshot()).timeline.some(entry => entry.id === removable.id));
+    const movable = await json(['issue', 'create', '-P', project.id, '-t', '移动测试']);
+    await json(['issue', 'comment', movable.id, '-b', '移动时保留']);
+    const moved = await json(['issue', 'move', movable.id, '--to', other.id]);
+    assert.equal(moved.projectId, other.id);
+    assert.equal((await f.store.snapshot()).timeline.find(entry => entry.issueId === movable.id)?.body, '移动时保留');
+    const staleDelete = await run(['issue', 'delete', movable.id, '--if-match', movable.revision]);
+    assert.equal(staleDelete.code, 1); assert.match(staleDelete.stderr, /CONFLICT/);
+    assert.equal((await json(['issue', 'delete', movable.id, '--if-match', moved.revision])).deleted, true);
+
   } finally { await f.close(); await rm(temp, { recursive: true, force: true }); }
 });

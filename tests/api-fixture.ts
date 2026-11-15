@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, writeFile, readdir, access, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, readdir, access, rm, rename } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { Store } from '../src/store';
@@ -22,6 +22,7 @@ export async function fixture() {
     async write(path, text) { await mkdir(dirname(join(vault, path)), { recursive: true }); await writeFile(join(vault, path), text); },
     async writeBinary(path, data) { await mkdir(dirname(join(vault, path)), { recursive: true }); await writeFile(join(vault, path), data); },
     async exists(path) { try { await access(join(vault, path)); return true; } catch { return false; } },
+    async rename(path, destination) { await mkdir(dirname(join(vault, destination)), { recursive: true }); await rename(join(vault, path), join(vault, destination)); },
     async removeFolder(path) { await rm(join(vault, path), { recursive: true, force: true }); },
   };
   const store = new Store(adapter);

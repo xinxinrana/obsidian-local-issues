@@ -30,6 +30,8 @@ async function page(f: Awaited<ReturnType<typeof fixture>>, path: string, live =
     w.Range.prototype.getBoundingClientRect = () => ({ left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0 } as DOMRect);
     const editorScript = await fetch(`${f.url}/api/markdown-editor.js`, { headers: { 'Sec-Fetch-Site': 'same-origin' } });
     assert.equal(editorScript.status, 200); w.eval(await editorScript.text());
+    // The page toolbar must work without OS detection after editor dependencies load.
+    Object.defineProperty(w.navigator, 'platform', { configurable: true, get: () => { throw new w.Error('网页工具栏不得读取 navigator.platform'); } });
   }
   const script = await fetch(`${f.url}/api/web-client.js`, { headers: { 'Sec-Fetch-Site': 'same-origin' } });
   assert.equal(script.status, 200);
@@ -217,6 +219,7 @@ test('served shared editor keeps form payload, source selection, undo and confli
     const issue = await f.store.createIssue(project.id, { title: 'One', body: '# 标题\n- [ ] 任务\n正文' });
     p = await page(f, '/live/issues/1', true);
     const form = p.edit('[data-edit="issue-body"]');
+    assert.equal(form.querySelector('[aria-label="加粗（Cmd/Ctrl+B）"] kbd')?.textContent, '⌘/Ctrl+B');
     const content = form.querySelector('.cm-content') as any;
     const editor = content.cmTile.root.view;
     p.set(form, 'body', '中文草稿');
@@ -239,5 +242,30 @@ test('served shared editor keeps form payload, source selection, undo and confli
     assert.equal((await f.store.getIssue(issue.id)).body, '外部修改');
     p.accept = true; p.click('[data-cancel]');
     assert.equal(form.querySelector('.cm-editor'), null, '关闭原位编辑释放 CodeMirror');
+  } finally { p?.close(); await f.close(); }
+});
+
+test('browser issue actions move the full conversation, confirm deletion and expose retryable errors', async () => {
+  const f = await fixture(); let p: Awaited<ReturnType<typeof page>> | undefined;
+  try {
+    const a = await f.store.createProject({ title: 'Source' }), b = await f.store.createProject({ title: 'Target' });
+    const issue = await f.store.createIssue(a.id, { title: 'Move', body: 'Body' });
+    const comment = await f.store.addComment(issue.id, 'Keep this comment');
+    p = await page(f, '/source/issues/1');
+    const move = [...p.doc.querySelectorAll<HTMLButtonElement>('aside [data-edit]')].find(button => button.textContent === '移动议题')!;
+    const form = p.edit(`[data-edit="${move.dataset.edit}"]`); p.set(form, 'project', b.id); p.submit(form);
+    await waitFor(() => p!.destinations.length === 1, form.textContent!);
+    assert.equal(p.destinations[0], '/target/issues/1');
+    assert.equal((await f.store.getIssue(issue.id)).projectId, b.id);
+    assert.equal((await f.store.snapshot()).timeline.find(entry => entry.id === comment.id)?.body, 'Keep this comment');
+    p.close(); p = await page(f, '/target/issues/1');
+    p.accept = false; p.click('[data-delete-issue]'); assert.equal(p.writes, 0); assert.equal(p.destinations.length, 0);
+    p.accept = true; p.fail(); p.click('[data-delete-issue]');
+    await waitFor(() => !!p!.doc.querySelector('aside [role=alert]'));
+    assert.match(p.doc.querySelector('aside [role=alert]')!.textContent!, /网络中断/);
+    assert.equal(p.doc.querySelector<HTMLButtonElement>('[data-delete-issue]')!.disabled, false);
+    p.click('[data-delete-issue]'); await waitFor(() => p!.destinations.length === 1);
+    assert.equal(p.destinations[0], '/target');
+    await assert.rejects(f.store.getIssue(issue.id), /找不到/);
   } finally { p?.close(); await f.close(); }
 });

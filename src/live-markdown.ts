@@ -1,6 +1,6 @@
 import type { App } from 'obsidian';
 import { createMarkdownEditor, type MarkdownHost } from './markdown-editor';
-export { MARKDOWN_TOOLS } from './markdown-editor';
+export { MARKDOWN_TOOLS, MARKDOWN_SHORTCUTS } from './markdown-editor';
 
 export function createLiveMarkdown(app: App, parent: HTMLElement, value: string, sourcePath: string, onChange: (value: string) => void, host: MarkdownHost = {}) {
   return createMarkdownEditor(parent, value, onChange, { ...host, image: target => {

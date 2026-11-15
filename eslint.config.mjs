@@ -5,7 +5,8 @@ import tseslint from 'typescript-eslint';
  * Mirrors the automated checks that run when a community release is scanned.
  * `src/web-client.ts` is not Obsidian plugin code: it is serialized into the
  * HTML pages served by the local API and runs in a plain browser, so the
- * Obsidian DOM/settings rules do not apply there.
+ * Obsidian DOM/settings helpers are unavailable there. OS-detection checks
+ * still apply so local CI agrees with the community review.
  */
 export default tseslint.config(
   { ignores: ['main.js', 'cli.mjs', 'node_modules/**', 'tests/**'] },
@@ -46,7 +47,7 @@ export default tseslint.config(
     rules: {
       // Browser page script: Obsidian's createEl/setCssProps/instanceOf helpers do not exist here.
       'obsidianmd/prefer-create-el': 'off',
-      'obsidianmd/platform': 'off',
+      'obsidianmd/platform': 'error',
       'obsidianmd/prefer-instanceof': 'off',
       'obsidianmd/no-static-styles-assignment': 'error',
       'no-unsanitized/property': 'error',

@@ -19,12 +19,13 @@ test('real view supports project → issue → Markdown comments, pasted and dro
   mock.notices.length = 0; mock.menus.length = 0;
   const files = new Map<string, string>(), binary = new Map<string, Uint8Array>();
   const adapter: VaultAdapter = { list: async () => [...files.keys()], read: async p => files.get(p)!,
-    write: async (p, text, expectedRaw) => { if (expectedRaw !== undefined && files.get(p) !== expectedRaw) throw new Error('写入冲突'); files.set(p, text); }, exists: async p => files.has(p) || binary.has(p),
+    write: async (p, text, expectedRaw) => { if (expectedRaw !== undefined && files.get(p) !== expectedRaw) throw new Error('写入冲突'); files.set(p, text); }, exists: async p => files.has(p) || binary.has(p) || [...files.keys()].some(key => key.startsWith(p + '/')),
     writeBinary: async (p, bytes) => { binary.set(p, bytes); },
+    rename: async (p, to) => { for (const [key, value] of [...files]) if (key === p || key.startsWith(p + '/')) { files.set(to + key.slice(p.length), value); files.delete(key); } },
     removeFolder: async p => { for (const key of [...files.keys()]) if (key.startsWith(`${p}/`)) files.delete(key); } };
   const store = new Store(adapter), copied: string[] = [], opened: string[] = [], shared: string[] = [];
   const app = { metadataCache: { getFirstLinkpathDest: () => null }, vault: { getMarkdownFiles: () => [...files.keys()].map(path => ({ path })) }, workspace: { openLinkText: async () => {} } };
-  const host = { store, author: 'Evan', openNote: async (path: string) => { opened.push(path); }, resourceLink: async (ref?: string) => { shared.push(ref); return 'http://localhost:27183/local-issues/issues/5'; }, openSettings() {} };
+  const host = { store, author: 'Evan', commentSubmit: 'mod-enter', openNote: async (path: string) => { opened.push(path); }, resourceLink: async (ref?: string) => { shared.push(ref); return 'http://localhost:27183/local-issues/issues/5'; }, openSettings() {} };
   const built = await build({ entryPoints: ['src/view.ts'], bundle: true, write: false, format: 'cjs', platform: 'node', external: ['obsidian'], logLevel: 'silent' });
   const module = { exports: {} as any };
   vm.runInNewContext(built.outputFiles[0].text, { module, exports: module.exports, require: (id: string) => id === 'obsidian' ? mock : require(id),
@@ -36,7 +37,7 @@ test('real view supports project → issue → Markdown comments, pasted and dro
   const leaf = { app, async setViewState(next: any) { const previous = view.getState(); const result = { history: false }; await view.setState(next.state || {}, result); if (result.history) nativeNavigations.push({ previous, next: view.getState() }); } };
   const view = new module.exports.IssuesView(leaf, host);
   const click = (name: string, parent: HTMLElement = view.contentEl) => {
-    const button = [...parent.querySelectorAll('button')].find(b => b.textContent === name) as HTMLButtonElement;
+    const button = [...parent.querySelectorAll('button')].find(b => b.textContent === name || b.getAttribute('aria-label') === name) as HTMLButtonElement;
     assert.ok(button, `缺少按钮 ${name}`); button.click();
   };
   const deleteDialog = () => mock.modals.find((m: any) => m.modalEl.classList.contains('li-delete-dialog'))?.modalEl as HTMLElement | undefined;
@@ -50,7 +51,7 @@ test('real view supports project → issue → Markdown comments, pasted and dro
   };
   const menuAction = (name: string) => { const menu = mock.menus.at(-1); assert.ok(menu?.shown, '菜单应已显示'); menu.select(name); };
   const cm = (node: any) => node.cmTile.root.view;
-  const fill = (node: any, value: string) => { assert.ok(node); if (node.classList.contains('cm-content')) { const editor = cm(node); editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: value } }); } else { node.value = value; node.dispatchEvent(new dom.window.Event('input', { bubbles: true })); } };
+  const fill = (node: any, value: string) => { assert.ok(node); if (node.classList.contains('cm-content')) { const editor = cm(node); editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: value }, selection: { anchor: value.length } }); } else { node.value = value; node.dispatchEvent(new dom.window.Event('input', { bubbles: true })); } };
   const value = (node: any) => cm(node).state.doc.toString();
   const uploading = (node: any) => node.closest('.li-editor').dataset.uploading;
   try {
@@ -85,6 +86,20 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     assert.equal(issue.author, 'Evan'); assert.deepEqual(issue.labels, ['功能', '体验']);
     const composer = () => view.contentEl.querySelector('.li-composer') as HTMLElement;
     let text = composer().querySelector('.cm-content') as HTMLTextAreaElement;
+    assert.deepEqual([...composer().querySelectorAll('.li-editor-tabs button')].map(button => button.textContent), ['编写', '预览']);
+    assert.ok(composer().querySelector('.li-editor-formatting button'));
+    assert.ok(composer().querySelector('.li-close-actions'));
+    assert.equal(composer().querySelector('.li-close-primary .li-icon')?.getAttribute('data-icon'), 'circle-check');
+    assert.ok(composer().querySelector('button[aria-label="选择关闭方式"]'));
+    assert.equal(composer().querySelector('select[aria-label="关闭原因"]'), null, '关闭原因不再要求预先选择');
+    fill(text, '快捷键'); cm(text).dispatch({ selection: { anchor: 0, head: 3 } });
+    const shortcut = new dom.window.KeyboardEvent('keydown', { key: 'b', metaKey: true, cancelable: true });
+    Object.defineProperty(shortcut, 'target', { value: text });
+    const binding = view.scope.keys.find((binding: any) => binding.key === 'B');
+    assert.equal(binding.callback(shortcut, {}), false, '原生作用域处理后阻止全局快捷键抢占');
+    assert.equal(value(text), '**快捷键**'); assert.equal(shortcut.defaultPrevented, true);
+    const composing = new dom.window.KeyboardEvent('keydown', { key: 'b', metaKey: true, isComposing: true });
+    Object.defineProperty(composing, 'target', { value: text }); binding.callback(composing, {}); assert.equal(value(text), '**快捷键**');
     fill(text, '第一条评论');
     const paste = new dom.window.Event('paste', { bubbles: true, cancelable: true });
     let finishPaste!: (bytes: ArrayBuffer) => void; const pasteBytes = new Promise<ArrayBuffer>(resolve => { finishPaste = resolve; });
@@ -126,7 +141,11 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     click('编辑标题'); const titleInput = view.contentEl.querySelector('input[aria-label="议题标题"]'); fill(titleInput, '修改后的标题'); click('保存', view.contentEl.querySelector('.li-detail-title'));
     await until(async () => (await store.getIssue(issue.id)).title === '修改后的标题', '原位保存标题');
     click('关闭 Issue'); await until(async () => (await store.getIssue(issue.id)).status === 'closed' && view.contentEl.textContent.includes('重新打开 Issue'), '关闭 Issue');
+    assert.equal((await store.getIssue(issue.id)).closeReason, 'completed', '主按钮直接按完成关闭');
     click('重新打开 Issue'); await until(async () => (await store.getIssue(issue.id)).status === 'open' && view.contentEl.textContent.includes('关闭 Issue'), '重新打开');
+    click('选择关闭方式', composer()); menuAction('关闭 · 搁置');
+    await until(async () => (await store.getIssue(issue.id)).closeReason === 'on-hold', '菜单选择搁置后立即关闭');
+    click('重新打开 Issue'); await until(async () => (await store.getIssue(issue.id)).status === 'open', '搁置后可以重新打开');
     assert.equal((await store.snapshot()).timeline.filter(t => t.kind === 'comment').length, 2);
     text = composer().querySelector('.cm-content')!; fill(text, '未发送的草稿'); text.focus(); await view.refresh();
     assert.equal(value(composer().querySelector('.cm-content')), '未发送的草稿');
@@ -202,7 +221,7 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     fill(composer().querySelector('.cm-content'), '需要明确反馈的评论');
     for (let i = 0; i < 3; i++) click('发表评论', composer());
     assert.equal(mock.modals.length, 1, '重复操作只打开一个确认框');
-    assert.match(mock.modals[0].contentEl.textContent, /议题描述.*丢失/);
+    assert.match(mock.modals[0].contentEl.textContent, /议题描述.*暂存在本机/);
     click('返回编辑', mock.modals[0].modalEl);
     await until(() => dom.window.document.activeElement === dirtyDescription, '返回编辑定位到真正的编辑框');
     assert.equal(value(dirtyDescription), '未保存的描述修改');
@@ -211,7 +230,7 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     for (let i = 0; i < 5; i++) click('删除', view.contentEl.querySelector('.li-timeline .li-comment'));
     assert.equal(mock.modals.length, 1, '编辑中连续删除不会重复弹窗或刷提示');
     assert.ok(!deleteDialog());
-    click('放弃修改并继续', mock.modals[0].modalEl);
+    click('保留草稿并继续', mock.modals[0].modalEl);
     await until(() => !!deleteDialog(), '放弃修改后继续原来的删除操作');
     assert.equal((await store.getIssue(issue.id)).body, '外部编辑正文');
     assert.ok(!view.contentEl.querySelector('.li-description .cm-content'));
@@ -227,7 +246,7 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     const submitButton = [...composer().querySelectorAll('button')].find(button => button.textContent === '发表评论') as HTMLButtonElement;
     submitButton.click(); submitButton.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
     assert.equal(mock.modals.length, 1);
-    click('放弃修改并继续', mock.modals[0].modalEl);
+    click('保留草稿并继续', mock.modals[0].modalEl);
     await until(() => /正在发表/.test(submitButton.textContent), '放弃修改后继续发表评论');
     submitButton.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
     assert.match(composer().textContent, /正在发表/);
@@ -289,7 +308,7 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     click('编辑标题'); fill(view.contentEl.querySelector('input[aria-label="议题标题"]'), '不保存的标题');
     click('编辑', view.contentEl.querySelector('.li-timeline .li-comment'));
     assert.match(mock.modals[0].contentEl.textContent, /议题标题/);
-    click('放弃修改并继续', mock.modals[0].modalEl);
+    click('保留草稿并继续', mock.modals[0].modalEl);
     await until(() => !!view.contentEl.querySelector('.li-timeline .cm-content'), '放弃标题后编辑评论');
     fill(view.contentEl.querySelector('.li-timeline .cm-content'), '不保存的评论');
     const originalState = view.getState();
@@ -298,16 +317,16 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     mock.modals[0].close(); await cancelledNavigation;
     assert.deepEqual(view.getState(), originalState, '关闭确认框保持当前页面及草稿');
     assert.equal(value(view.contentEl.querySelector('.li-timeline .cm-content')), '不保存的评论');
-    view.contentEl.querySelector<HTMLButtonElement>('[aria-label="修改标签"]')!.click(); click('放弃修改并继续', mock.modals[0].modalEl);
+    view.contentEl.querySelector<HTMLButtonElement>('[aria-label="修改标签"]')!.click(); click('保留草稿并继续', mock.modals[0].modalEl);
     await until(() => !!view.contentEl.querySelector('.li-sidebar .li-property-editor'), '放弃评论后修改属性');
     fill(view.contentEl.querySelector('.li-sidebar input[placeholder="多个标签用逗号分隔"]'), '不保存标签');
     click('添加子议题'); assert.match(mock.modals[0].contentEl.textContent, /议题属性/);
-    click('放弃修改并继续', mock.modals[0].modalEl);
+    click('保留草稿并继续', mock.modals[0].modalEl);
     await until(() => !!view.contentEl.querySelector('.li-create'), '放弃属性后新建议题');
     fill(view.contentEl.querySelector('input[placeholder="简洁描述这件事"]'), '不保存的新议题');
     const acceptedNavigation = view.navigate(project.id);
     assert.match(mock.modals[0].contentEl.textContent, /新建议题/);
-    click('放弃修改并继续', mock.modals[0].modalEl); await acceptedNavigation;
+    click('保留草稿并继续', mock.modals[0].modalEl); await acceptedNavigation;
     assert.ok(!view.contentEl.querySelector('.li-create'));
     assert.equal((await store.snapshot()).issues.length, 2);
     await view.navigate(project.id, issue.id);
@@ -317,7 +336,7 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     fill(view.contentEl.querySelector('.li-description .cm-content'), '刷新前未保存');
     await view.refresh(); click('有更新 · 刷新');
     assert.equal(mock.modals.length, 1);
-    click('放弃修改并继续', mock.modals[0].modalEl);
+    click('保留草稿并继续', mock.modals[0].modalEl);
     await until(() => !view.contentEl.querySelector('.li-description .cm-content'), '确认放弃后刷新');
     dom.window.document.activeElement?.blur();
     const snapshot = store.snapshot.bind(store);
@@ -347,8 +366,12 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     editProperty('截止日期'); fill(propertyArea().querySelector('input'), '2026-11-15'); click('保存', propertyArea());
     await until(async () => (await store.getIssue(issue.id)).dueDate === '2026-11-15' && !propertyArea(), '直接修改日期');
     assert.equal((await store.getIssue(issue.id)).body, propertySnapshot.body);
-    editProperty('父议题');
-    const parentChoice = propertyArea().querySelector('select')!; parentChoice.value = child.id;
+    const chooseParent = (id: string) => {
+      click('选择父议题', propertyArea()); const picker = mock.modals.at(-1);
+      if (!id) click('无父议题', picker.contentEl);
+      else { const option = picker.contentEl.querySelector<HTMLButtonElement>(`[data-issue-id="${id}"]`); assert.ok(option, '父议题候选'); option.click(); }
+    };
+    editProperty('父议题'); chooseParent(child.id);
     click('保存', propertyArea());
     await until(() => /循环/.test(propertyArea().querySelector('[role="alert"]')!.textContent!), '父议题循环错误持续显示');
     assert.equal((await store.getIssue(issue.id)).parent, '');
@@ -358,11 +381,14 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     assert.deepEqual((await store.getIssue(issue.id)).dependencies, []);
     click('取消', propertyArea());
     const relationTarget = await store.createIssue(project.id, { title: '关联目标' }); await view.refresh();
-    editProperty('父议题'); propertyArea().querySelector('select')!.value = relationTarget.id; click('保存', propertyArea());
+    editProperty('父议题'); chooseParent(relationTarget.id); click('保存', propertyArea());
     await until(async () => (await store.getIssue(issue.id)).parent === relationTarget.id && !propertyArea(), '直接设置父议题');
-    editProperty('父议题'); propertyArea().querySelector('select')!.value = ''; click('保存', propertyArea());
+    editProperty('父议题'); chooseParent(''); click('保存', propertyArea());
     await until(async () => !(await store.getIssue(issue.id)).parent && !propertyArea(), '清除父议题');
-    editProperty('依赖'); fill(propertyArea().querySelector('input'), '关联目标'); click(`界面项目 #${relationTarget.number} 关联目标`, propertyArea()); click('保存', propertyArea());
+    editProperty('依赖'); fill(propertyArea().querySelector('input'), '关联目标');
+    const composingEnter = new dom.window.KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true, cancelable: true });
+    propertyArea().querySelector('input')!.dispatchEvent(composingEnter); assert.equal(composingEnter.defaultPrevented, false, '中文输入法确认候选时不提交关联');
+    click(`界面项目 #${relationTarget.number} 关联目标`, propertyArea()); click('保存', propertyArea());
     await until(async () => (await store.getIssue(issue.id)).dependencies.includes(relationTarget.id) && !propertyArea(), '搜索并添加依赖');
     editProperty('依赖'); propertyArea().querySelector<HTMLButtonElement>('[aria-label="移除依赖 关联目标"]')!.click(); click('保存', propertyArea());
     await until(async () => !(await store.getIssue(issue.id)).dependencies.length && !propertyArea(), '移除依赖');
@@ -469,5 +495,36 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     click('移入废纸篓', deleting.modalEl);
     await until(async () => (await store.snapshot()).projects.length === 0, '归档项目可以直接删除');
     assert.ok(!view.contentEl.querySelector('.li-archived-row'), '删除后归档区消失');
+    const movingProject = await store.createProject({ title: '移动目标' });
+    const movingSource = await store.createProject({ title: '移动来源' });
+    const moving = await store.createIssue(movingSource.id, { title: '从界面移动与删除', body: '保留正文' });
+    await store.addComment(moving.id, '保留讨论');
+    await view.navigate(movingSource.id, moving.id);
+    const keyboardComment = composer().querySelector('.cm-content');
+    fill(keyboardComment, '默认回车换行');
+    keyboardComment.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    assert.equal(value(keyboardComment), '默认回车换行\n', '默认模式按 Enter 只换行');
+    assert.equal((await store.snapshot()).timeline.filter(t => t.issueId === moving.id && t.kind === 'comment').length, 1);
+    host.commentSubmit = 'enter'; fill(keyboardComment, '单回车发表');
+    keyboardComment.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await until(async () => (await store.snapshot()).timeline.filter(t => t.issueId === moving.id && t.kind === 'comment').length === 2, '设置后单回车发表评论');
+    const shiftComment = composer().querySelector('.cm-content'); fill(shiftComment, '保留换行');
+    shiftComment.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true, cancelable: true }));
+    assert.equal(value(shiftComment), '保留换行\n', '回车发表模式下 Shift+Enter 仍换行');
+    assert.equal((await store.snapshot()).timeline.filter(t => t.issueId === moving.id && t.kind === 'comment').length, 2);
+    view.contentEl.querySelector<HTMLButtonElement>('[aria-label="Issue 更多操作"]')!.click(); menuAction('移动议题');
+    await until(() => mock.modals.some((m: any) => m.titleEl.textContent === '移动议题'), '移动窗口');
+    let moveModal = mock.modals.at(-1); moveModal.contentEl.querySelector('select').value = movingProject.id;
+    moveModal.contentEl.querySelector('select').dispatchEvent(new dom.window.Event('change'));
+    click('保存', moveModal.modalEl);
+    await until(async () => (await store.getIssue(moving.id)).projectId === movingProject.id && !mock.modals.length, '移动议题保存');
+    await until(() => view.getState().projectId === movingProject.id, '进入移动后的项目');
+    view.contentEl.querySelector<HTMLButtonElement>('[aria-label="Issue 更多操作"]')!.click(); menuAction('删除议题');
+    await until(() => !!deleteDialog(), '删除议题确认'); click('取消', deleteDialog()!);
+    assert.equal((await store.getIssue(moving.id)).title, '从界面移动与删除');
+    view.contentEl.querySelector<HTMLButtonElement>('[aria-label="Issue 更多操作"]')!.click(); menuAction('删除议题');
+    await until(() => !!deleteDialog(), '再次确认删除议题'); click('确认删除', deleteDialog()!);
+    await until(async () => !(await store.snapshot()).issues.some(i => i.id === moving.id) && !deleteDialog(), '删除议题');
+    await until(() => !view.getState().issueId, '删除后回到项目列表');
   } finally { for (const modal of [...mock.modals]) modal.close(); await view.onClose(); dom.window.close(); }
 });

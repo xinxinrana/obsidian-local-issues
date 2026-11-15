@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="260" viewBox="0 0 1000 260" role="img" aria-labelledby="title description">
+  <title id="title">Local Issues</title>
+  <desc id="description">本地项目、议题与讨论，保存在 Obsidian Markdown 笔记库中。适合深色背景。</desc>
+  <g transform="translate(12 12)"><g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="51" y="13" width="165" height="151" rx="22" fill="#30243F" stroke="#6F5599" stroke-width="7"/>
+    <path d="M53 34H174Q195 34 195 55V160Q195 181 174 181H101L58 207V181H53Q32 181 32 160V55Q32 34 53 34Z" fill="#231B32" stroke="#B994F3" stroke-width="7"/>
+    <circle cx="77" cy="82" r="15" stroke="#75D3A4" stroke-width="5.5"/>
+    <circle cx="77" cy="82" r="4" fill="#75D3A4"/>
+    <path d="M116 82H157" stroke="#B994F3" stroke-opacity=".5" stroke-width="7"/>
+    <circle cx="77" cy="135" r="15" stroke="#B994F3" stroke-width="5.5"/>
+    <path d="M70 135L75 140L85 129" stroke="#B994F3" stroke-width="4.5"/>
+    <path d="M116 135H157" stroke="#B994F3" stroke-opacity=".5" stroke-width="7"/>
+  </g></g>
+  <text x="273" y="143" fill="#F4EEFC" font-family="Arial, Helvetica, sans-serif" font-size="96" font-weight="700" letter-spacing="-4">Local <tspan fill="#B994F3">Issues</tspan></text>
+  <text x="280" y="198" fill="#C7B1E3" font-family="Arial, Helvetica, sans-serif" font-size="20" font-weight="500" letter-spacing="1.5">YOUR PROJECTS. YOUR ISSUES. YOUR VAULT.</text>
+</svg>

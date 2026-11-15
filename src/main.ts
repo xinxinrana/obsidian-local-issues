@@ -1,15 +1,18 @@
-import { App, FileSystemAdapter, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, normalizePath, requestUrl } from 'obsidian';
-import { randomBytes } from 'node:crypto';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
-import { CliInstaller, CliInstallError, type CliProgress } from './cli-installer';
+import { App, FileSystemAdapter, Notice, Platform, Plugin, PluginSettingTab, Setting, setIcon, TFile, normalizePath, requestUrl, type WorkspaceLeaf } from 'obsidian';
+import { MobileModal } from './mobile';
+import { randomUUID } from './platform-crypto';
+import { DraftJournal } from './draft-journal';
+import { Drafts } from './drafts';
+import type { CliInstaller, CliProgress } from './cli-installer';
 import { agentGuide, agentSkill } from './agent-skill';
 import { ResourceRoutes, slug } from './routes';
 import { Store } from './store';
-import { startApi } from './api';
+import type { startApi } from './api';
 import { IssuesView, VIEW_TYPE, type ViewHost } from './view';
+import type { HistoryDirection } from './trackpad-navigation';
 import { suppressTooltips } from './tooltips';
 import type { VaultAdapter } from './types';
+import { layoutPreferences, type LayoutPreferences } from './layout-preferences';
 
 interface Settings {
   root: string;
@@ -20,13 +23,19 @@ interface Settings {
   projectSlugs?: Record<string, string>;
   shares: Record<string, { ref: string }>;
   cliNodePath?: string;
+  draftStorageId?: string;
+  layout?: LayoutPreferences;
+  trackpadNavigation: boolean;
+  commentSubmit: 'mod-enter' | 'enter';
 }
-const DEFAULTS: Settings = { root: 'Local Issues', author: '我', apiEnabled: false, port: 27183, shares: {} };
+const DEFAULTS: Settings = { root: 'Local Issues', author: '我', apiEnabled: false, port: 27183, shares: {}, trackpadNavigation: true, commentSubmit: 'mod-enter' };
 
 export default class LocalIssuesPlugin extends Plugin implements ViewHost {
   declare settings: Settings;
   store!: Store;
   routes!: ResourceRoutes;
+  draftCache!: Drafts;
+  draftJournal!: DraftJournal;
   private server?: Awaited<ReturnType<typeof startApi>>;
   private refreshTimer?: ReturnType<typeof setTimeout>;
   private unloaded = false;
@@ -39,26 +48,64 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
   private cliTask?: Promise<string>;
   private cliStatusVersion = 0;
   private cliListeners = new Set<() => void>();
+  private desktop?: Promise<typeof import('./desktop')>;
+  private layoutSave: Promise<void> = Promise.resolve();
   get author(): string { return this.settings.author; }
+  get trackpadNavigation(): boolean { return this.settings.trackpadNavigation; }
+  get commentSubmit(): 'mod-enter' | 'enter' { return this.settings.commentSubmit; }
+  get layout(): LayoutPreferences { return this.settings.layout || {}; }
+  async saveLayout(patch: Partial<LayoutPreferences>): Promise<void> {
+    this.layoutSave = this.layoutSave.catch(() => {}).then(async () => {
+      const previous = this.settings.layout;
+      this.settings.layout = { ...this.layout, ...patch };
+      try { await this.saveSettings(); } catch (error) { this.settings.layout = previous; throw error; }
+    });
+    await this.layoutSave;
+  }
+  get desktopAvailable(): boolean { return !Platform.isMobile; }
+  private desktopServices() {
+    if (!this.desktopAvailable) throw new Error('此功能仅在桌面端提供。');
+    return this.desktop ??= import('./desktop');
+  }
 
   async onload(): Promise<void> {
     const saved = await this.loadData();
     this.settings = { ...DEFAULTS, ...(saved ?? {}), shares: saved?.shares ?? {} };
+    this.settings.layout = layoutPreferences((saved as Partial<Settings> | null)?.layout);
     delete (this.settings as unknown as Record<string, unknown>).token;
     delete (this.settings as unknown as Record<string, unknown>).apiToken;
     this.settings.shares = Object.fromEntries(Object.entries(this.settings.shares).map(([id, entry]) => [id, { ref: entry.ref }]));
     this.settings.repoSlug ??= slug(this.app.vault.getName());
     this.settings.projectSlugs ??= {};
+    this.settings.draftStorageId ||= randomUUID();
     this.routes = new ResourceRoutes(this.settings.repoSlug, this.settings.projectSlugs, () => this.saveData(this.settings));
     await this.saveData(this.settings);
     this.configureStore();
+    let journal: Storage | undefined;
+    try { journal = window.localStorage; } catch { /* Use the independent disk replica. */ }
+    this.draftJournal = new DraftJournal({ prefix: `local-issues:${this.settings.draftStorageId}`, directory: `${this.manifest.dir || `${this.app.vault.configDir}/plugins/local-issues`}/drafts`, disk: this.app.vault.adapter,
+      journal, legacy: key => this.app.loadLocalStorage?.(key), warn: message => { new Notice(message, 0); } });
+    await this.draftJournal.initialize();
+    this.draftCache = new Drafts(this.draftJournal, message => { new Notice(message, 0); });
     this.registerView(VIEW_TYPE, leaf => new IssuesView(leaf, this));
     this.addRibbonIcon('list-todo', 'Local Issues：项目', () => { void this.activate().catch(this.report); });
     this.addCommand({ id: 'open-projects', name: '打开项目', callback: () => { void this.activate().catch(this.report); } });
-    this.addCommand({ id: 'copy-skill', name: '复制 Agent Skill', callback: () => { void this.copySkill(); } });
-    this.addCommand({ id: 'copy-guide', name: '复制给 Agent 的引导语（含 skill 安装说明）', callback: () => { void this.copyGuide(); } });
-    this.addCommand({ id: 'install-cli', name: '安装或修复 CLI', callback: () => { void this.installCli().catch(this.report); } });
-    this.addCommand({ id: 'remove-cli', name: '卸载 CLI 命令', callback: () => { void this.removeCli().catch(this.report); } });
+    this.addCommand({ id: 'open-local-issues', name: '打开 Local Issues', callback: () => { void this.activate().catch(this.report); } });
+    for (const direction of ['back', 'forward'] as const) this.addCommand({
+      id: `history-${direction}`, name: direction === 'back' ? '返回上一页' : '前进下一页',
+      checkCallback: checking => {
+        const leaf = this.app.workspace.activeLeaf;
+        if (!(leaf?.view instanceof IssuesView)) return false;
+        if (!checking) this.navigateHistory(leaf, direction);
+        return true;
+      },
+    });
+    if (this.desktopAvailable) {
+      this.addCommand({ id: 'copy-skill', name: '复制 Agent Skill', callback: () => { void this.copySkill(); } });
+      this.addCommand({ id: 'copy-guide', name: '复制给 Agent 的引导语（含 skill 安装说明）', callback: () => { void this.copyGuide(); } });
+      this.addCommand({ id: 'install-cli', name: '安装或修复 CLI', callback: () => { void this.installCli().catch(this.report); } });
+      this.addCommand({ id: 'remove-cli', name: '卸载 CLI 命令', callback: () => { void this.removeCli().catch(this.report); } });
+    }
     this.addCommand({ id: 'open-current-issue', name: '在项目中打开当前 Issue 笔记', checkCallback: checking => {
       const file = this.app.workspace.getActiveFile();
       if (!file || !file.path.startsWith(`${this.settings.root}/`)) return false;
@@ -71,7 +118,7 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
     });
     this.app.workspace.onLayoutReady(() => {
       if (this.unloaded) return;
-      void this.restartApi();
+      if (this.desktopAvailable) void this.restartApi();
     });
     for (const event of ['create', 'modify', 'delete', 'rename'] as const) {
       this.registerEvent(this.app.vault.on(event as 'modify', () => this.scheduleRefresh()));
@@ -118,7 +165,15 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
       removeFolder: async path => {
         path = safe(path);
         const folder = vault.getAbstractFileByPath(path);
-        if (folder) await vault.trash(folder, vault.adapter instanceof FileSystemAdapter);
+        if (folder) await vault.trash(folder, this.desktopAvailable && vault.adapter instanceof FileSystemAdapter);
+      },
+      rename: async (path, destination) => {
+        path = safe(path); destination = safe(destination);
+        if (await vault.adapter.exists(destination)) throw new Error('目标位置已存在，请刷新后重试');
+        await folders(destination);
+        const file = vault.getAbstractFileByPath(path);
+        if (!file) throw new Error('原笔记或目录已不存在，请刷新后重试');
+        await this.app.fileManager.renameFile(file, destination);
       },
       writeBinary: async (path, data) => {
         path = safe(path); await folders(path);
@@ -132,9 +187,9 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
   async activate(projectId?: string, issueId?: string): Promise<void> {
     const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0];
     const leaf = existing ?? this.app.workspace.getLeaf('tab');
-    if (!existing) await leaf.setViewState({ type: VIEW_TYPE, active: true });
+    if (!existing) await leaf.setViewState({ type: VIEW_TYPE, active: true, state: projectId || issueId ? { projectId, issueId } : {} });
     await this.app.workspace.revealLeaf(leaf);
-    if (leaf.view instanceof IssuesView) await leaf.view.navigate(projectId, issueId);
+    if (existing && (projectId || issueId) && leaf.view instanceof IssuesView) await leaf.view.navigate(projectId, issueId);
   }
 
   async openReference(ref: string): Promise<void> {
@@ -149,8 +204,16 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
     await this.app.workspace.openLinkText(path, '', 'tab');
   }
 
+  navigateHistory(leaf: WorkspaceLeaf, direction: HistoryDirection): void {
+    this.app.workspace.setActiveLeaf(leaf, { focus: true });
+    const commands = (this.app as App & { commands?: { executeCommandById(id: string): boolean } }).commands;
+    const ran = commands?.executeCommandById(direction === 'back' ? 'app:go-back' : 'app:go-forward');
+    if (!ran) new Notice(direction === 'back' ? '当前没有可返回的页面' : '当前没有可前进的页面');
+  }
+
   openSettings(): void {
-    const modal = new Modal(this.app);
+    const modal = new MobileModal(this.app);
+    modal.modalEl.addClass('li-settings-modal');
     modal.modalEl.addClass('li-settings');
     suppressTooltips(modal.modalEl);
     modal.setTitle('Local Issues 设置');
@@ -162,13 +225,14 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
   }
 
   async share(ref: string): Promise<string> {
+    if (!this.desktopAvailable) throw new Error('手机端仅提供本地人工读写。');
     if (!this.server) throw new Error('请先在 Local Issues 设置中启用本地 Agent API');
     const resolved = await this.store.resolve(ref);
     if (resolved.kind === 'note') throw new Error('只能分享项目或 Issue');
     const stableRef = resolved.value.id;
     let entry = Object.entries(this.settings.shares).find(([, s]) => s.ref === stableRef);
     if (!entry) {
-      const id = randomBytes(12).toString('hex');
+      const id = randomUUID().replace(/-/g, '');
       this.settings.shares[id] = { ref: stableRef };
       await this.saveData(this.settings);
       entry = [id, this.settings.shares[id]];
@@ -182,6 +246,7 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
   }
 
   private async cliPath(): Promise<string> {
+    if (!this.desktopAvailable) throw new Error('CLI 仅在桌面端提供。');
     const adapter = this.app.vault.adapter;
     const relativePath = `${this.manifest.dir ?? `${this.app.vault.configDir}/plugins/local-issues`}/cli.mjs`;
     if (!await adapter.exists(relativePath)) throw new Error('CLI 尚未安装，请在 Local Issues 设置点击「安装 CLI」。');
@@ -198,6 +263,7 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
   private origin(): string { return `http://localhost:${this.server?.port ?? this.settings.port}`; }
 
   private async cliInstaller(): Promise<CliInstaller> {
+    const { CliInstaller, homedir, join } = await this.desktopServices();
     const vault = await this.vaultPath();
     return new CliInstaller({ home: homedir(), vault, version: this.manifest.version, nodeHint: this.settings.cliNodePath,
       cancelled: () => this.unloaded,
@@ -247,6 +313,7 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
         }
         new Notice(this.cliMessage); return installer.command;
       } catch (error) {
+        const { CliInstallError } = await this.desktopServices();
         if (!this.cliProgress.some(step => step.state === 'error')) progress({ step: remove ? 'remove' : 'prepare', title: remove ? '卸载 CLI 命令' : '准备安装', state: 'error', detail: error instanceof Error ? error.message : String(error), help: error instanceof CliInstallError ? error.help : '请确认相关目录可读写后重试。', link: error instanceof CliInstallError ? error.link : undefined });
         throw error;
       } finally { this.cliBusy = false; this.cliTask = undefined; this.cliChanged(); }
@@ -257,11 +324,13 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
   async removeCli(): Promise<void> { await this.cliOperation(true); }
 
   async restartApi(): Promise<void> {
+    if (!this.desktopAvailable) return;
     this.apiQueue = this.apiQueue.catch(() => {}).then(async () => {
       if (this.server) { await this.server.close(); this.server = undefined; }
       this.apiError = '';
       if (!this.settings.apiEnabled || this.unloaded) return;
       try {
+        const { startApi } = await this.desktopServices();
         this.server = await startApi({ store: this.store, port: this.settings.port,
           vaultName: this.app.vault.getName(), routes: this.routes, shares: this.settings.shares,
           saveShares: () => this.saveData(this.settings), open: ref => this.openReference(ref), author: this.settings.author,
@@ -314,6 +383,7 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
 
   onunload(): void {
     this.unloaded = true;
+    void this.draftJournal?.flush().catch(this.report);
     this.cliListeners.clear();
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     void this.apiQueue.finally(() => this.server?.close()).catch(console.error);
@@ -322,33 +392,97 @@ export default class LocalIssuesPlugin extends Plugin implements ViewHost {
 
 class LocalIssuesSettings extends PluginSettingTab {
   private cliCleanup?: () => void;
+  private activeTab = 'general';
   hide(): void { this.cliCleanup?.(); this.cliCleanup = undefined; }
   constructor(app: App, private plugin: LocalIssuesPlugin) { super(app, plugin); }
   display(): void {
     const { containerEl: el, plugin: p } = this; el.empty(); suppressTooltips(el);
     el.addClass('li-settings');
-    new Setting(el).setName('打开项目').setDesc('项目、Issues、评论和看板。').addButton(b => b.setButtonText('打开').setCta().onClick(() => p.activate()));
-    new Setting(el).setName('显示名称').setDesc('新建 Issue、评论和状态记录的默认作者。').addText(t => t.setValue(p.settings.author).onChange(async value => {
+    const header = el.createDiv({ cls: 'li-settings-header' });
+    const brand = header.createDiv({ cls: 'li-settings-brand' });
+    setIcon(brand.createDiv({ cls: 'li-settings-logo' }), 'list-todo');
+    const identity = brand.createDiv();
+    identity.createEl('strong', { text: 'Local Issues' });
+    identity.createSpan({ cls: 'li-settings-version', text: p.manifest.version });
+    const open = header.createEl('button', { cls: 'mod-cta', text: '打开项目' });
+    open.addEventListener('click', () => { void p.activate(); });
+    const nav = el.createDiv({ cls: 'li-settings-nav' });
+    nav.setAttribute('role', 'tablist');
+    nav.setAttribute('aria-label', '设置分类');
+    const panels = el.createDiv({ cls: 'li-settings-panels' });
+    const sections: Record<string, HTMLElement> = {};
+    for (const [id, title, icon] of [['general', '常规', 'sliders-horizontal'], ['interaction', '操作', 'keyboard'], ...(p.desktopAvailable ? [['agent', 'Agent', 'bot']] : [])]) {
+      const button = nav.createEl('button', { cls: 'li-settings-tab' });
+      setIcon(button.createSpan(), icon);
+      button.createSpan({ text: title });
+      button.setAttribute('role', 'tab');
+      const panel = panels.createDiv({ cls: 'li-settings-panel' });
+      panel.setAttribute('role', 'tabpanel');
+      panel.setAttribute('aria-label', title);
+      sections[id] = panel;
+      button.addEventListener('click', () => {
+        this.activeTab = id;
+        for (const [key, section] of Object.entries(sections)) section.hidden = key !== id;
+        for (const tab of Array.from(nav.children)) {
+          const selected = tab === button;
+          tab.classList.toggle('is-active', selected);
+          tab.setAttribute('aria-selected', String(selected));
+        }
+      });
+      button.classList.toggle('is-active', this.activeTab === id);
+      button.setAttribute('aria-selected', String(this.activeTab === id));
+      panel.hidden = this.activeTab !== id;
+    }
+    const general = sections.general.createDiv({ cls: 'li-settings-card' });
+    const interaction = sections.interaction.createDiv({ cls: 'li-settings-card' });
+    new Setting(general).setName('显示名称').setDesc('新建 Issue、评论和状态记录的默认作者。').addText(t => t.setValue(p.settings.author).onChange(async value => {
       p.settings.author = value.trim() || '我'; p.store.author = p.settings.author; await p.saveSettings();
     }));
-    new Setting(el).setName('笔记目录').setDesc(`当前目录：${p.settings.root}。修改后重启 Obsidian 生效；已有笔记不会迁移。`)
+    new Setting(general).setName('笔记目录').setDesc('修改后重启 Obsidian 生效，已有笔记保留在原目录。')
       .addText(t => t.setValue(p.settings.root).onChange(async value => {
         const v = value.trim().replace(/\/$/, '');
         if (!v || v.startsWith('/') || v.includes('\\') || v.split('/').some(s => !s || s === '.' || s === '..' || s.startsWith('.'))) return;
         p.settings.root = v; await p.saveSettings();
       }));
-    new Setting(el).setName('本地 Agent API').setDesc('仅监听 127.0.0.1，供 CLI 和分享链接读写当前笔记库。')
+    sections.general.createEl('p', { text: '本地 Markdown · 随笔记库同步', cls: 'setting-item-description' });
+    new Setting(interaction).setName('评论发布快捷键').setDesc('选择「回车发表」时，Enter 发表、Shift+Enter 换行；选择「快捷键发表」时，⌘/Ctrl+Enter 发表、Enter 换行。')
+      .addDropdown(d => d.addOption('mod-enter', '快捷键发表（⌘/Ctrl+Enter）').addOption('enter', '回车发表（Enter）').setValue(p.settings.commentSubmit).onChange(async value => {
+        p.settings.commentSubmit = value === 'enter' ? 'enter' : 'mod-enter'; await p.saveSettings();
+      }));
+    if (Platform.isMacOS) {
+      new Setting(interaction).setName('触控板双指导航').setDesc('在 Local Issues 页面双指向右滑返回、向左滑前进；输入和横向滚动时不会触发。')
+        .addToggle(t => t.setValue(p.settings.trackpadNavigation).onChange(async value => { p.settings.trackpadNavigation = value; await p.saveSettings(); }));
+      const guide = sections.interaction.createDiv({ cls: 'li-gesture-guide' });
+      for (const direction of ['back', 'forward'] as const) {
+        const back = direction === 'back';
+        const card = guide.createDiv({ cls: 'li-gesture-card' });
+        const visual = card.createDiv({ cls: `li-gesture-visual is-${direction}` });
+        visual.setAttribute('role', 'img');
+        visual.setAttribute('aria-label', back ? '两根手指在触控板上向右滑动，返回上一页' : '两根手指在触控板上向左滑动，前进到下一页');
+        visual.createSpan({ cls: 'li-gesture-arrow', text: back ? '←' : '→' }).setAttribute('aria-hidden', 'true');
+        const trackpad = visual.createDiv({ cls: 'li-gesture-trackpad' });
+        trackpad.setAttribute('aria-hidden', 'true');
+        const fingers = trackpad.createDiv({ cls: 'li-gesture-fingers' });
+        fingers.createSpan({ cls: 'li-gesture-finger' }); fingers.createSpan({ cls: 'li-gesture-finger' });
+        card.createEl('strong', { text: back ? '双指向右滑 · 后退' : '双指向左滑 · 前进' });
+        card.createEl('p', { text: back ? '回到刚才查看的项目或议题' : '返回刚才离开的页面', cls: 'setting-item-description' });
+      }
+      sections.interaction.createEl('p', { text: '键盘操作：在 Obsidian 的「快捷键」中搜索 Local Issues，可为「返回上一页」「前进下一页」设置喜欢的组合键；命令面板也可直接执行。', cls: 'setting-item-description' });
+    }
+    if (!p.desktopAvailable) return;
+    const agent = sections.agent.createDiv({ cls: 'li-settings-card' });
+    new Setting(agent).setName('本地 Agent API').setDesc('仅监听 127.0.0.1，供 CLI 和分享链接读写当前笔记库。')
       .addToggle(t => t.setValue(p.settings.apiEnabled).onChange(async value => { p.settings.apiEnabled = value; await p.saveSettings(); await p.restartApi(); this.display(); }));
-    new Setting(el).setName('API 端口').setDesc(p.apiError || `http://127.0.0.1:${p.settings.port}`)
+    new Setting(agent).setName('API 端口').setDesc(p.apiError || `http://127.0.0.1:${p.settings.port}`)
       .addText(t => t.setValue(String(p.settings.port)).onChange(async value => {
         if (!/^\d+$/.test(value) || +value < 1024 || +value > 65535) return;
         p.settings.port = +value; await p.saveSettings();
       })).addButton(b => b.setButtonText('应用端口').onClick(async () => { await p.restartApi(); this.display(); }));
-    const cli = new Setting(el).setName('Agent CLI').setDesc('安装后，Agent 可在终端直接使用 local-issues。');
+    const cli = new Setting(agent).setName('Agent CLI').setDesc('安装后，Agent 可在终端直接使用 local-issues。');
     let install!: HTMLButtonElement, remove!: HTMLButtonElement;
     cli.addButton(b => { install = b.buttonEl; b.setButtonText('安装 CLI').setCta().onClick(() => { void p.installCli().catch(() => {}); }); })
       .addButton(b => { remove = b.buttonEl; b.setButtonText('卸载 CLI').onClick(() => { void p.removeCli().catch(() => {}); }); });
-    const progress = el.createDiv({ cls: 'li-cli-progress' }); progress.setAttribute('aria-live', 'polite');
+    const progress = sections.agent.createDiv({ cls: 'li-cli-progress' }); progress.setAttribute('aria-live', 'polite');
     const renderCli = () => {
       install.disabled = remove.disabled = p.cliBusy;
       install.textContent = p.cliBusy ? '处理中…' : p.cliInstalled ? '修复安装' : '安装 CLI';
@@ -369,9 +503,9 @@ class LocalIssuesSettings extends PluginSettingTab {
       else if (!p.cliProgress.length) progress.createEl('p', { text: p.cliInstalled ? 'CLI 命令已安装。' : '点击安装，将检查运行环境并补齐所需文件。', cls: 'setting-item-description' });
     };
     this.cliCleanup?.(); this.cliCleanup = p.onCliChange(renderCli); renderCli(); void p.refreshCliStatus();
-    new Setting(el).setName('Agent 接入').setDesc('复制引导语交给 Agent，或将 Skill 保存到 Agent 的技能目录。')
+    new Setting(agent).setName('Agent 接入').setDesc('复制引导语交给 Agent，或将 Skill 保存到 Agent 的技能目录。')
       .addButton(b => b.setButtonText('复制引导语').onClick(() => p.copyGuide()))
       .addButton(b => b.setButtonText('复制 Skill').onClick(() => p.copySkill()));
-    el.createEl('p', { text: '内容保存在 Markdown 文件中，附件位于 resource/local-issues/。停用插件后仍可直接阅读与编辑。链接用于定位仓库、项目或议题，无需登录或密钥，仅在这台电脑的 Obsidian 运行时可用。', cls: 'setting-item-description' });
+    sections.agent.createEl('p', { text: '内容保存在 Markdown 文件中，附件位于 resource/local-issues/。停用插件后仍可直接阅读与编辑。链接用于定位仓库、项目或议题，无需登录或密钥，仅在这台电脑的 Obsidian 运行时可用。', cls: 'setting-item-description' });
   }
 }

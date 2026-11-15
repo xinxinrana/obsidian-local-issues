@@ -18,9 +18,9 @@ test('bundled plugin registers native entry points; Vault adapter, protocol, API
   const changed = () => events.forEach(fn => fn());
   let injectExternalEdit = false;
   const vault = {
-    configDir: '.obsidian', getName: () => 'Tests', getMarkdownFiles: () => [...files.keys()].map(p => new mock.TFile(p)),
+    configDir: '.obsidian', getName: () => 'Tests', getMarkdownFiles: () => [...files.keys()].filter(path => path.endsWith('.md')).map(p => new mock.TFile(p)),
     getAbstractFileByPath: (p: string) => files.has(p) || binary.has(p) ? Object.assign(new mock.TFile(p), { stat: { size: binary.get(p)?.byteLength || files.get(p)?.length || 0 } }) : null,
-    adapter: { exists: async (p: string) => files.has(p) || folders.has(p) || binary.has(p), read: async (p: string) => { if (!files.has(p)) throw new Error('文件不存在'); return files.get(p)!; } },
+    adapter: { write: async (p: string, value: string) => { files.set(p, value); }, mkdir: async (p: string) => { folders.add(p); }, list: async (p: string) => ({ files: [...files.keys()].filter(path => path.startsWith(p + '/')), folders: [] }), exists: async (p: string) => files.has(p) || folders.has(p) || binary.has(p), read: async (p: string) => { if (!files.has(p)) throw new Error('文件不存在'); return files.get(p)!; } },
     read: async (f: { path: string }) => files.get(f.path)!,
     readBinary: async (f: { path: string }) => Uint8Array.from(binary.get(f.path)!).buffer,
     createFolder: async (p: string) => { folders.add(p); },
@@ -32,40 +32,63 @@ test('bundled plugin registers native entry points; Vault adapter, protocol, API
     },
     on: (_event: string, fn: () => void) => { events.push(fn); return fn; },
   };
-  const leaves: any[] = [], openedNotes: string[] = [];
+  const leaves: any[] = [], openedNotes: string[] = [], nativeCommands: string[] = [];
   let plugin: any;
   const app: any = {
     vault, metadataCache: { getFirstLinkpathDest: () => null }, savedData: { port: 0, apiEnabled: true, token: 'legacy-token', shares: { old: { ref: 'legacy', key: 'legacy-secret' } } },
+    commands: { executeCommandById: (id: string) => { nativeCommands.push(id); return true; } },
     workspace: {
-      onLayoutReady() {}, getActiveFile: () => null,
+      activeLeaf: null, onLayoutReady() {}, getActiveFile: () => null,
+      setActiveLeaf(leaf: any) { this.activeLeaf = leaf; },
       getLeavesOfType: () => leaves,
       getLeaf: () => {
         const leaf: any = { app, async setViewState(state: { type: string; state?: any }) { if (!leaf.view) { leaf.view = plugin.views.get(state.type)(leaf); leaves.push(leaf); await leaf.view.onOpen(); } await leaf.view.setState(state.state || {}, { history: false }); } }; return leaf;
       },
-      revealLeaf: async () => {}, openLinkText: async (p: string) => { openedNotes.push(p); },
+      revealLeaf: async (leaf: any) => { app.workspace.activeLeaf = leaf; }, openLinkText: async (p: string) => { openedNotes.push(p); },
     },
   };
-  const built = await build({ entryPoints: ['src/main.ts'], bundle: true, write: false, minify: true, format: 'cjs', platform: 'node', external: ['obsidian'], target: 'es2022', logLevel: 'silent' });
+  const built = await build({ entryPoints: ['src/main.ts'], bundle: true, write: false, minify: true, format: 'cjs', platform: 'browser', external: ['obsidian', 'node:*'], target: 'es2022', logLevel: 'silent' });
   const module = { exports: {} as any };
   vm.runInNewContext(built.outputFiles[0].text, { module, exports: module.exports,
     require: (id: string) => id === 'obsidian' ? mock : require(id),
     console, document: dom.window.document, window: dom.window, navigator, HTMLElement: dom.window.HTMLElement, HTMLImageElement: dom.window.HTMLImageElement, MutationObserver: dom.window.MutationObserver, Window: dom.window.Window, getComputedStyle: dom.window.getComputedStyle,
     HTMLInputElement: dom.window.HTMLInputElement, HTMLTextAreaElement: dom.window.HTMLTextAreaElement, HTMLLabelElement: dom.window.HTMLLabelElement, HTMLSelectElement: dom.window.HTMLSelectElement,
     Event: dom.window.Event, MouseEvent: dom.window.MouseEvent, Node: dom.window.Node, Element: dom.window.Element,
-    setTimeout, clearTimeout, setInterval, clearInterval, queueMicrotask, URL, URLSearchParams, Buffer, Uint8Array, ArrayBuffer,
+    setTimeout, clearTimeout, setInterval, clearInterval, queueMicrotask, URL, URLSearchParams, Buffer, Uint8Array, ArrayBuffer, TextEncoder, crypto: globalThis.crypto,
   }, { filename: 'main.js' });
   plugin = new module.exports.default(app, { id: 'local-issues', dir: '.obsidian/plugins/local-issues' });
   try {
     await plugin.onload();
+    const saveData = plugin.saveData.bind(plugin); let failLayoutSave = true;
+    plugin.saveData = async (data: any) => { if (failLayoutSave) { failLayoutSave = false; throw new Error('设置写入失败'); } await saveData(data); };
+    const failedLayout = plugin.saveLayout({ sidebarWidth: 320 });
+    const queuedLayout = plugin.saveLayout({ projectSort: 'manual', projectOrder: ['remembered'] });
+    await assert.rejects(failedLayout, /设置写入失败/); await queuedLayout;
+    assert.equal(app.savedData.layout.sidebarWidth, undefined, '失败的偏好写入不能混入下一次保存');
+    assert.deepEqual([...app.savedData.layout.projectOrder], ['remembered']);
+    await Promise.all([plugin.saveLayout({ sidebarWidth: 300 }), plugin.saveLayout({ projectSort: 'updated' })]);
+    assert.equal(app.savedData.layout.sidebarWidth, 300); assert.equal(app.savedData.layout.projectSort, 'updated');
+    assert.equal(app.savedData.port, 0, '布局偏好不能覆盖原有插件设置');
+    plugin.saveData = saveData;
     assert.ok(plugin.views.has('local-issues-view'));
     assert.ok(plugin.protocols.has('local-issues'));
     assert.ok(plugin.commands.some((c: any) => c.id === 'open-projects'));
+    assert.equal(plugin.commands.find((c: any) => c.id === 'open-local-issues').name, '打开 Local Issues');
     assert.equal(app.savedData.token, undefined); assert.equal(app.savedData.shares.old.key, undefined);
     const p = await plugin.store.createProject({ title: '主窗口项目', description: '项目说明' });
     const i = await plugin.store.createIssue(p.id, { title: '原生窗口中的 Issue', body: '[[普通笔记]]' });
     assert.ok(files.has(i.path));
     await plugin.activate(p.id, i.id);
     assert.match(dom.window.document.body.textContent!, /原生窗口中的 Issue/);
+    await plugin.commands.find((c: any) => c.id === 'open-local-issues').callback();
+    assert.equal(leaves.length, 1, '打开命令复用当前窗口');
+    assert.equal(leaves[0].view.getState().issueId, i.id, '打开命令与侧栏图标一致，保留当前阅读位置');
+    for (const [id, native] of [['history-back', 'app:go-back'], ['history-forward', 'app:go-forward']]) {
+      const command = plugin.commands.find((c: any) => c.id === id);
+      assert.equal(command.checkCallback(true), true); command.checkCallback(false);
+      assert.equal(nativeCommands.at(-1), native);
+    }
+    assert.equal(app.workspace.activeLeaf, leaves[0]);
     await plugin.openNote(i.path); assert.equal(openedNotes[0], i.path);
     injectExternalEdit = true;
     await assert.rejects(plugin.store.updateIssue(i.id, { body: '不应覆盖' }, i.revision), /冲突/);
@@ -128,8 +151,21 @@ test('bundled plugin registers native entry points; Vault adapter, protocol, API
       },
       remove: async () => { removals++; },
     });
+    mock.Platform.isMacOS = true;
     plugin.openSettings(); assert.match(mock.modals.at(-1).contentEl.textContent, /本地 Agent API/);
     const settingsEl = mock.modals.at(-1).contentEl;
+    assert.match(settingsEl.textContent, /双指向右滑 · 后退/);
+    assert.match(settingsEl.textContent, /双指向左滑 · 前进/);
+    assert.equal(settingsEl.querySelectorAll('.li-gesture-visual[role=img]').length, 2);
+    const trackpadSetting = [...settingsEl.querySelectorAll('.setting-item')].find((item: any) => item.textContent.includes('触控板双指导航'));
+    const trackpadToggle = trackpadSetting.querySelector('input[type=checkbox]') as HTMLInputElement;
+    assert.equal(trackpadToggle.checked, true); trackpadToggle.checked = false; trackpadToggle.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 0)); assert.equal(plugin.settings.trackpadNavigation, false);
+    const commentSetting = [...settingsEl.querySelectorAll('.setting-item')].find((item: any) => item.textContent.includes('评论发布快捷键'));
+    const commentSubmit = commentSetting.querySelector('select') as HTMLSelectElement;
+    assert.equal(commentSubmit.value, 'mod-enter'); commentSubmit.value = 'enter'; commentSubmit.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 0)); assert.equal(plugin.settings.commentSubmit, 'enter');
+    mock.Platform.isMacOS = false;
     const install = [...settingsEl.querySelectorAll('button')].find((button: any) => button.textContent === '安装 CLI') as HTMLButtonElement;
     assert.ok(install); assert.equal(settingsEl.querySelector('.li-cli-progress input'), null, 'No advanced Node controls before a failure');
     install.click(); install.click(); await new Promise(resolve => setTimeout(resolve, 0));

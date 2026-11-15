@@ -23,7 +23,8 @@ test('live Markdown preserves source while editing links, images and code, and r
     assert.ok(editor.contentDOM.classList.contains('cm-lineWrapping'), '已有正文和新输入均自动换行');
     assert.equal(parent.querySelector('.li-live-link')?.textContent, '显示名称');
     assert.ok(parent.querySelector('.li-live-strong'), '加粗内容直接呈现');
-    assert.equal(parent.querySelector('.li-live-image')?.getAttribute('src'), 'app://local/image.png');
+    assert.equal(parent.querySelector('.li-live-image'), null);
+    assert.match(parent.querySelector('.cm-content')!.textContent!, /!\[\[image\.png\]\]/, '编写时图片保持原文，避免组合输入时跳动');
     assert.match(parent.querySelector('.cm-content')!.textContent!, /\[\[code\]\]/);
     assert.match(parent.querySelector('.cm-content')!.textContent!, /\[\[literal\]\]/);
     const from = initial.indexOf('[[notes');
