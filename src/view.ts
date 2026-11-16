@@ -759,11 +759,53 @@ export class IssuesView extends ItemView {
           close = action(split, '关闭 Issue', () => closeIssue('completed'), 'li-close-primary', 'circle-check');
           choices = action(split, '', () => undefined, 'li-close-toggle', 'chevron-down');
           choices.setAttribute('aria-label', '选择关闭方式'); choices.setAttribute('aria-haspopup', 'menu'); choices.title = '选择关闭方式';
-          choices.addEventListener('click', event => {
-            const menu = new Menu();
-            for (const [reason, name] of Object.entries(CLOSE_REASON_NAMES) as [CloseReason, string][]) menu.addItem(item => item.setTitle(`关闭 · ${name}`).setIcon(STATE_ICONS[reason]).onClick(() => closeIssue(reason)));
-            menu.showAtMouseEvent(event);
+          const menu = el(split, 'div', 'li-close-menu');
+          menu.setAttribute('role', 'menu'); menu.setAttribute('aria-label', '关闭方式');
+          menu.setAttribute('popover', 'auto'); menu.hidden = true;
+          choices.setAttribute('aria-controls', menu.id = `li-close-menu-${++controlId}`);
+          choices.setAttribute('aria-expanded', 'false');
+          let menuOpen = false;
+          const hideMenu = () => {
+            if (!menuOpen) return;
+            menuOpen = false;
+            menu.hidePopover?.(); menu.hidden = true;
+            choices.setAttribute('aria-expanded', 'false');
+          };
+          const descriptions: Record<CloseReason, string> = { completed: '已完成，关闭此议题', 'on-hold': '暂时搁置，留待后续处理', 'not-planned': '不再计划处理此议题' };
+          for (const [reason, name] of Object.entries(CLOSE_REASON_NAMES) as [CloseReason, string][]) {
+            const option = action(menu, '', () => { hideMenu(); closeIssue(reason); }, `li-close-option li-reason-${reason}`, STATE_ICONS[reason]);
+            option.setAttribute('role', 'menuitem'); option.setAttribute('aria-label', `关闭 · ${name}`);
+            const copy = el(option, 'span', 'li-close-option-copy');
+            el(copy, 'span', 'li-close-option-title', `关闭 · ${name}`);
+            el(copy, 'span', 'li-close-option-description', descriptions[reason]);
+          }
+          const showMenu = () => {
+            menu.hidden = false; menu.showPopover?.(); menuOpen = true;
+            const anchor = choices.getBoundingClientRect(), bounds = menu.getBoundingClientRect();
+            menu.style.left = `${Math.max(8, Math.min(anchor.right - bounds.width, window.innerWidth - bounds.width - 8))}px`;
+            menu.style.top = `${Math.max(8, anchor.top >= bounds.height + 8 ? anchor.top - bounds.height - 8 : Math.min(anchor.bottom + 8, window.innerHeight - bounds.height - 8))}px`;
+            choices.setAttribute('aria-expanded', 'true');
+            menu.querySelector<HTMLButtonElement>('button')?.focus();
+          };
+          choices.addEventListener('click', () => { if (menuOpen) hideMenu(); else showMenu(); });
+          choices.addEventListener('keydown', event => { if (event.key === 'ArrowDown') { event.preventDefault(); showMenu(); } });
+          menu.addEventListener('toggle', event => { if ((event as ToggleEvent).newState === 'closed') { menuOpen = false; menu.hidden = true; choices.setAttribute('aria-expanded', 'false'); } });
+          this.renderScope.registerDomEvent(document, 'pointerdown', event => { if (!split.contains(event.target as Node)) hideMenu(); }, true);
+          this.renderScope.registerDomEvent(document, 'keydown', event => {
+            if (!menuOpen) return;
+            if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); hideMenu(); choices.focus(); }
+            else if (event.key === 'Tab') hideMenu();
+          }, true);
+          menu.addEventListener('keydown', event => {
+            const options = Array.from(menu.querySelectorAll<HTMLButtonElement>('button'));
+            const current = options.indexOf(document.activeElement as HTMLButtonElement);
+            const offset = event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0;
+            if (offset) { event.preventDefault(); options[(current + offset + options.length) % options.length]?.focus(); }
+            else if (event.key === 'Home' || event.key === 'End') { event.preventDefault(); options[event.key === 'Home' ? 0 : options.length - 1]?.focus(); }
           });
+          this.renderScope.registerDomEvent(this.contentEl, 'scroll', hideMenu, true);
+          this.renderScope.registerDomEvent(window, 'resize', hideMenu);
+          this.renderScope.register(hideMenu);
         }
       }
       const draft = this.cacheForm(editor.element, `new-comment:${issue.id}`);
