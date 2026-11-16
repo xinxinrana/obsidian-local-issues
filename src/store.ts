@@ -206,13 +206,15 @@ export class Store implements IssueStore {
       await this.adapter.write(value.path, raw); return { ...value, revision: revision(raw) };
     });
   }
-  async updateIssue(ref: string, patch: IssuePatch, expectedUpdatedAt?: string): Promise<Issue> {
+  async updateIssue(ref: string, patch: IssuePatch, expectedUpdatedAt?: string, comment?: string): Promise<Issue> {
     return this.mutate(async () => {
       const snap = await this.snapshot(); const old = this.pickIssue(snap, ref); this.conflict(old, expectedUpdatedAt);
       const actor = patch.actor === undefined ? this.author : fieldText(patch.actor, '操作者').trim() || this.author;
+      if (comment !== undefined && !fieldText(comment, '评论').trim()) throw new Error('评论不能为空');
       const value = await this.issueFields({ ...old, updatedAt: this.now() }, patch, snap);
       const previousRaw = await this.adapter.read(old.path); this.conflict({ updatedAt: '', revision: revision(previousRaw) }, old.revision);
       const raw = markdown(this.issueMeta(value, snap), value.body, parse(previousRaw));
+      if (comment !== undefined) await this.writeTimeline(old, 'comment', comment, actor);
       await this.adapter.write(value.path, raw, previousRaw);
       if (value.status !== old.status || value.closeReason !== old.closeReason) await this.writeTimeline(value, 'event', value.status === 'closed' ? `关闭了此 Issue（${({ completed: '完成', 'on-hold': '搁置', 'not-planned': '不做' } as const)[value.closeReason || 'completed']}）` : '重新打开了此 Issue', actor, { from: old.status, to: value.status });
       return { ...value, revision: revision(raw) };

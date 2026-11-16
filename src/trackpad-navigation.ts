@@ -52,6 +52,7 @@ export function trackpadNavigation(element: HTMLElement, options: TrackpadNaviga
     fadeWhenIdle();
     if (Math.abs(x) < 90 || time - triggeredAt < 700) return;
     triggeredAt = time; locked = true; x = y = 0;
+    if (glowing) { glowing = false; options.feedback?.(null, 0); }
     options.navigate(direction);
   };
   element.addEventListener('wheel', wheel, { passive: false });

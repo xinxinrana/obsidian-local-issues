@@ -45,16 +45,18 @@ test('edge feedback follows finger direction and brightness, then fades after th
     f.tick(20); f.wheel(-36);
     assert.deepEqual(f.feedback.at(-1), { direction: 'back', progress: 0.6 });
     f.tick(20); f.wheel(-36);
-    assert.deepEqual(f.feedback.at(-1), { direction: 'back', progress: 1 });
+    assert.deepEqual(f.feedback.at(-2), { direction: 'back', progress: 1 });
     assert.deepEqual(f.directions, ['back']);
+    assert.deepEqual(f.feedback.at(-1), { direction: null, progress: 0 }, 'navigation starts fading immediately');
     f.tick(30); f.wheel(-100);
-    assert.deepEqual(f.feedback.at(-1), { direction: 'back', progress: 1 }, 'momentum keeps the completed glow visible');
+    assert.deepEqual(f.feedback.at(-1), { direction: null, progress: 0 }, 'momentum does not revive the completed glow');
     f.tick(200); f.wheel(0, 20);
     assert.deepEqual(f.feedback.at(-1), { direction: null, progress: 0 }, 'idle or vertical scrolling fades the glow');
     f.tick(1000); f.wheel(30);
     assert.deepEqual(f.feedback.at(-1), { direction: 'forward', progress: 1 / 3 });
     f.tick(20); f.wheel(60);
-    assert.deepEqual(f.feedback.at(-1), { direction: 'forward', progress: 1 });
+    assert.deepEqual(f.feedback.at(-2), { direction: 'forward', progress: 1 });
+    assert.deepEqual(f.feedback.at(-1), { direction: null, progress: 0 }, 'forward navigation also fades immediately');
     f.dispose();
     assert.deepEqual(f.feedback.at(-1), { direction: null, progress: 0 }, 'view cleanup also clears feedback');
   } finally { f.dispose(); f.dom.window.close(); }

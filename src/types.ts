@@ -39,7 +39,7 @@ export interface IssueStore {
   updateProject(ref: string, patch: ProjectPatch, expectedUpdatedAt?: string): Promise<Project>;
   deleteProject(ref: string, force?: boolean): Promise<{ project: Project; issues: number; folder: string }>;
   createIssue(project: string, input: IssueInput): Promise<Issue>;
-  updateIssue(ref: string, patch: IssuePatch, expectedUpdatedAt?: string): Promise<Issue>;
+  updateIssue(ref: string, patch: IssuePatch, expectedUpdatedAt?: string, comment?: string): Promise<Issue>;
   deleteIssue(ref: string, expectedUpdatedAt?: string): Promise<void>;
   moveIssue(ref: string, project: string, expectedUpdatedAt?: string): Promise<Issue>;
   addComment(ref: string, body: string, author?: string): Promise<TimelineEntry>;

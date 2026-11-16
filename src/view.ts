@@ -742,21 +742,39 @@ export class IssuesView extends ItemView {
     for (const entry of entries) { if (entry.kind === 'event') { const event = el(timeline, 'div', 'li-event'); pill(event, entry.to || 'open'); el(event, 'span', '', `${entry.author} ${entry.body}`); el(event, 'span', 'li-muted', date(entry.createdAt)); } else { const comment = el(timeline, 'article', 'li-comment'); comment.dataset.commentId = entry.id; const head = el(comment, 'div', 'li-comment-header'); el(head, 'strong', '', entry.author); el(head, 'span', 'li-muted', `${date(entry.createdAt)}${entry.updatedAt !== entry.createdAt ? ' · 已编辑' : ''}`); el(head, 'div', 'li-spacer'); const content = el(comment, 'div', 'li-description-content'); const edit = action(head, '编辑', () => safe(() => this.afterEditing(() => { edit.hidden = true; content.replaceChildren(); const text = this.editor(content, entry.body, issue.id, entry.path); const buttons = text.actions; const draft = this.cacheForm(text.element, `comment:${entry.id}`, entry.revision ?? entry.updatedAt); this.startEditing(text.element, `评论 · ${entry.author} · ${date(entry.createdAt)} · ${entry.body.replace(/\s+/g, ' ').slice(0, 40)}`, () => text.value !== entry.body || text.uploading, () => { text.destroy(); content.replaceChildren(); this.markdown(content, entry.body, entry.path); edit.hidden = false; }); action(buttons, '取消', () => { this.stopEditing(true); if (this.pending) safe(() => this.draw()); }); const save = action(buttons, '保存', () => safe(async () => { if (!text.value.trim()) throw new Error('评论不能为空'); if (text.uploading) throw new Error('附件正在保存，请稍后保存'); save.disabled = true; try { const submitted = draft.snapshot(); await this.host.store.editComment(entry.id, text.value, draft.revision); draft.complete(submitted); this.stopEditing(); await this.draw(); } finally { save.disabled = false; } }), 'mod-cta'); text.focus(); })), 'li-subtle'); action(head, '笔记', () => safe(() => this.host.openNote(entry.path)), 'li-subtle'); action(head, '删除', () => this.deleteComment(comment, entry), 'li-subtle li-delete-comment'); this.markdown(content, entry.body, entry.path); } }
     const compose = () => {
       const composer = el(main, 'section', 'li-composer'); el(composer, 'h3', '', '发表评论'); const editor = this.editor(composer, this.drafts.get(issue.id) || '', issue.id, issue.path, value => this.drafts.set(issue.id, value), () => this.host.commentSubmit === 'enter'); const status = el(editor.element, 'div', 'li-composer-status'); status.setAttribute('role', 'status'); const footer = editor.actions;
+      const draft = this.cacheForm(editor.element, `new-comment:${issue.id}`);
+      let changingStatus = false;
+      const updateStatus = (patch: IssuePatch) => {
+        if (changingStatus) return;
+        safe(() => this.afterEditing(async () => {
+          if (editor.uploading) { status.textContent = '附件正在保存，请稍后切换状态'; new Notice(status.textContent); return; }
+          const comment = editor.value.trim() ? editor.value : undefined;
+          const submitted = comment === undefined ? undefined : draft.snapshot();
+          changingStatus = true; this.submittingComment = true;
+          const buttons = [...footer.querySelectorAll('button')]; for (const button of buttons) button.disabled = true;
+          status.textContent = comment === undefined ? '正在更新状态…' : '正在发表评论并更新状态…';
+          try {
+            await this.host.store.updateIssue(issue.id, { ...patch, actor: this.host.author }, issue.revision ?? issue.updatedAt, comment);
+            if (submitted) { draft.complete(submitted); editor.clear(); this.drafts.delete(issue.id); }
+            this.submittingComment = false;
+            await this.draw();
+            if (comment !== undefined) new Notice('评论已发表，Issue 状态已更新');
+          } catch (error) {
+            status.textContent = `状态更新失败：${error instanceof Error ? error.message : String(error)}`;
+            throw error;
+          } finally {
+            changingStatus = false; this.submittingComment = false;
+            if (footer.isConnected) for (const button of buttons) button.disabled = false;
+          }
+        }));
+      };
       if (!this.phone) {
-        if (issue.status === 'closed') action(footer, '重新打开 Issue', () => safe(() => this.afterEditing(async () => { await this.host.store.updateIssue(issue.id, { status: 'open', actor: this.host.author }, issue.revision ?? issue.updatedAt); await this.draw(); })), '', 'circle-dot');
+        if (issue.status === 'closed') action(footer, '重新打开 Issue', () => updateStatus({ status: 'open' }), '', 'circle-dot');
         else {
           const split = el(footer, 'div', 'li-close-actions');
-          let closing = false;
-          let close: HTMLButtonElement, choices: HTMLButtonElement;
-          const closeIssue = (reason: CloseReason) => {
-            if (closing) return;
-            safe(() => this.afterEditing(async () => {
-              closing = true; close.disabled = choices.disabled = true;
-              try { await this.host.store.updateIssue(issue.id, { status: 'closed', closeReason: reason, actor: this.host.author }, issue.revision ?? issue.updatedAt); await this.draw(); }
-              finally { closing = false; close.disabled = choices.disabled = false; }
-            }));
-          };
-          close = action(split, '关闭 Issue', () => closeIssue('completed'), 'li-close-primary', 'circle-check');
+          let choices: HTMLButtonElement;
+          const closeIssue = (reason: CloseReason) => updateStatus({ status: 'closed', closeReason: reason });
+          action(split, '关闭 Issue', () => closeIssue('completed'), 'li-close-primary', 'circle-check');
           choices = action(split, '', () => undefined, 'li-close-toggle', 'chevron-down');
           choices.setAttribute('aria-label', '选择关闭方式'); choices.setAttribute('aria-haspopup', 'menu'); choices.title = '选择关闭方式';
           const menu = el(split, 'div', 'li-close-menu');
@@ -808,7 +826,6 @@ export class IssuesView extends ItemView {
           this.renderScope.register(hideMenu);
         }
       }
-      const draft = this.cacheForm(editor.element, `new-comment:${issue.id}`);
       const send = async () => {
         if (this.submittingComment) return;
         const feedback = (message: string) => { status.textContent = message; new Notice(message); };
