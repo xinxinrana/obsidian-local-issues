@@ -67,7 +67,6 @@ export class IssuesView extends ItemView {
   private layout: LayoutPreferences;
   private group = '';
   private projectFields = new Set(['progress', 'count', 'status', 'due']);
-  private issueFields = new Set(['status', 'labels', 'milestone', 'assignees', 'due']);
   private mode: 'list' | 'board' | 'table' = 'list';
   private selected = new Set<string>();
   private batching = false;
@@ -391,14 +390,16 @@ export class IssuesView extends ItemView {
   }
   private async reorderProject(source: Project, target: Project, after: boolean, visible: Project[]) {
     if (source.id === target.id) return;
-    if (this.group === 'status' && source.status !== target.status) { new Notice('按状态分组时，请在同一组内调整顺序'); return; }
     const before = this.projectSort;
     const base = orderedProjects(this.data.projects, this.projectSort, this.layout.projectOrder).map(project => project.id);
     const projectOrder = moveProjectOrder(base, visible.map(project => project.id), source.id, target.id, after);
     const scroll = (this.phone?.content || this.contentEl).scrollTop;
     this.projectSort = 'manual';
-    try { await this.writeLayout({ projectOrder, projectSort: 'manual' }); }
-    catch (error) { this.projectSort = before; throw error; }
+    try {
+      if ((this.group === 'status' || source.status === 'archived' || target.status === 'archived') && source.status !== target.status) await this.host.store.updateProject(source.id, { status: target.status }, source.revision ?? source.updatedAt);
+      await this.writeLayout({ projectOrder, projectSort: 'manual' });
+    }
+    catch (error) { this.projectSort = before; await this.draw(); throw error; }
     await this.draw(); (this.phone?.content || this.contentEl).scrollTop = scroll;
     [...this.contentEl.querySelectorAll<HTMLButtonElement>('.li-project-drag-handle')].find(button => button.dataset.projectId === source.id)?.focus({ preventScroll: true });
     new Notice(`已调整「${source.title}」的顺序`);
@@ -408,12 +409,19 @@ export class IssuesView extends ItemView {
     const handle = action(parent, '', () => {}, 'li-subtle li-project-drag-handle', 'grip-vertical'); handle.dataset.projectId = project.id;
     handle.setAttribute('aria-label', `拖动项目：${project.title}`); handle.setAttribute('aria-description', '拖动调整顺序，也可以使用上下方向键');
     handle.addEventListener('click', event => event.stopPropagation());
-    let startX = 0, startY = 0, x = 0, y = 0, moved = false, frame = 0, destination: Project | undefined, after = false;
+    let startX = 0, startY = 0, x = 0, y = 0, moved = false, frame = 0, destination: Project | undefined, destinationStatus: ProjectStatus | undefined, after = false;
     const win = row.ownerDocument.defaultView!;
     const clearMarker = () => { for (const node of this.contentEl.querySelectorAll('.li-drop-before,.li-drop-after')) node.removeClass('li-drop-before', 'li-drop-after'); };
     const targetAtPointer = () => {
-      clearMarker(); destination = undefined;
-      const target = row.ownerDocument.elementFromPoint(x, y)?.closest<HTMLElement>('[data-project-row]');
+      clearMarker(); destination = undefined; destinationStatus = undefined;
+      const pointed = row.ownerDocument.elementFromPoint(x, y);
+      const group = pointed?.closest<HTMLElement>('[data-project-group]');
+      if (group && this.contentEl.contains(group)) {
+        destinationStatus = group.dataset.projectGroup as ProjectStatus;
+        if (destinationStatus !== project.status) group.addClass('li-drop-after');
+        return;
+      }
+      const target = pointed?.closest<HTMLElement>('[data-project-row]');
       if (!target || !this.contentEl.contains(target) || target === row) return;
       destination = visible.find(project => project.id === target.dataset.projectId);
       if (!destination) return;
@@ -427,7 +435,7 @@ export class IssuesView extends ItemView {
       targetAtPointer(); frame = win.requestAnimationFrame(autoscroll);
     };
     this.renderScope.register(pointerDrag(handle, {
-      start: event => { if (this.editingInline || this.batching || this.layoutDragging) return false; startX = x = event.clientX; startY = y = event.clientY; moved = false; destination = undefined; this.layoutDragging = true; return true; },
+      start: event => { if (this.editingInline || this.batching || this.layoutDragging) return false; startX = x = event.clientX; startY = y = event.clientY; moved = false; destination = undefined; destinationStatus = undefined; this.layoutDragging = true; return true; },
       move: event => {
         x = event.clientX; y = event.clientY;
         if (!moved && Math.hypot(x - startX, y - startY) > 5) { moved = true; row.addClass('is-reordering'); handle.setAttribute('aria-pressed', 'true'); frame = win.requestAnimationFrame(autoscroll); }
@@ -436,7 +444,10 @@ export class IssuesView extends ItemView {
       end: (_event, cancelled) => {
         win.cancelAnimationFrame(frame); this.layoutDragging = false; row.removeClass('is-reordering'); handle.setAttribute('aria-pressed', 'false'); clearMarker();
         if (!cancelled && moved && destination) safe(() => this.reorderProject(project, destination!, after, visible));
-        else if (this.pending && !this.closed) safe(() => this.draw());
+        else if (!cancelled && moved && destinationStatus && destinationStatus !== project.status) {
+          const status = destinationStatus;
+          safe(async () => { await this.host.store.updateProject(project.id, { status }, project.revision ?? project.updatedAt); await this.draw(); new Notice(`已将「${project.title}」移至${STATUS_NAMES[status]}`); });
+        } else if (this.pending && !this.closed) safe(() => this.draw());
       },
     }));
     this.renderScope.registerDomEvent(handle, 'keydown', event => {
@@ -491,28 +502,33 @@ export class IssuesView extends ItemView {
     const projects = orderedProjects(matching.filter(p => p.status !== 'archived' && (!this.state || p.status === this.state)), this.projectSort, this.layout.projectOrder);
     if (this.group === 'status') projects.sort((a, b) => PROJECT_STATES.indexOf(a.status) - PROJECT_STATES.indexOf(b.status));
     if (!this.data.projects.length) { const empty = el(root, 'div', 'li-empty'); setIcon(el(empty, 'div', 'li-empty-icon'), 'folders'); el(empty, 'h3', '', '把想法变成项目'); el(empty, 'p', 'li-muted', '为每个项目记录 Issues、讨论和进度，所有内容保存在本地 Markdown 中。'); action(empty, '创建第一个项目', () => this.projectModal(), 'mod-cta', 'plus'); return; }
+    const groupedProjects = this.group === 'status' ? PROJECT_STATES.filter(status => status !== 'archived' && (!this.state || this.state === status)).map(status => ({ status, projects: projects.filter(project => project.status === status) })) : [{ status: '', projects }];
     if (Platform.isMobile) {
       const cards = el(root, 'div', 'li-project-cards');
-      let group = '';
-      for (const project of projects) {
-        if (this.group && group !== project.status) { group = project.status; el(cards, 'h3', 'li-section-heading', STATUS_NAMES[project.status]); }
-        const card = el(cards, 'article', 'li-project-card'); this.tapCard(card, () => this.navigate(project.id));
-        const heading = el(card, 'div', 'li-project-card-heading'); this.projectDragHandle(heading, card, project, projects); action(heading, project.title, () => safe(() => this.navigate(project.id)), 'li-project-title');
-        action(heading, '编辑', () => this.projectModal(project), 'li-subtle');
-        if (project.description) el(card, 'p', 'li-muted', project.description.split('\n')[0]);
-        const issues = this.data.issues.filter(i => i.projectId === project.id), done = issues.filter(i => i.status === 'closed').length;
-        const meta = el(card, 'div', 'li-project-card-meta'); pill(meta, project.status); el(meta, 'span', 'li-muted', `${done}/${issues.length} 个议题完成`);
-        if (project.dueDate) el(meta, 'span', 'li-muted', `截止 ${project.dueDate}`);
+      for (const group of groupedProjects) {
+        if (group.status) el(cards, 'h3', 'li-section-heading', STATUS_NAMES[group.status as ProjectStatus]).dataset.projectGroup = group.status;
+        for (const project of group.projects) {
+          const card = el(cards, 'article', 'li-project-card'); this.tapCard(card, () => this.navigate(project.id));
+          const heading = el(card, 'div', 'li-project-card-heading'); this.projectDragHandle(heading, card, project, projects); action(heading, project.title, () => safe(() => this.navigate(project.id)), 'li-project-title');
+          action(heading, '编辑', () => this.projectModal(project), 'li-subtle');
+          if (project.description) el(card, 'p', 'li-muted', project.description.split('\n')[0]);
+          const issues = this.data.issues.filter(i => i.projectId === project.id), done = issues.filter(i => i.status === 'closed').length;
+          const meta = el(card, 'div', 'li-project-card-meta'); pill(meta, project.status); el(meta, 'span', 'li-muted', `${done}/${issues.length} 个议题完成`);
+          if (project.dueDate) el(meta, 'span', 'li-muted', `截止 ${project.dueDate}`);
+        }
       }
       if (!projects.length) el(root, 'p', 'li-empty', archived.length ? '没有进行中的项目，已归档的在下方。' : '没有匹配的项目。');
       this.renderArchived(root, archived); return;
     }
     const table = el(root, 'table', 'li-table li-projects'); const tr = el(el(table, 'thead'), 'tr'); for (const name of ['', '项目', '进度', 'Issues', '状态', '截止', '']) el(tr, 'th', '', name); const body = el(table, 'tbody');
-    let group = ''; for (const project of projects) { if (this.group && group !== project.status) { group = project.status; const cell = el(el(body, 'tr', 'li-group'), 'td', '', STATUS_NAMES[project.status]); cell.colSpan = 7; }
-      const row = el(body, 'tr'); this.shareContextMenu(row, project.id, '项目'); this.projectDragHandle(el(row, 'td', 'li-project-handle-cell'), row, project, projects); const name = el(row, 'td'); action(name, project.title, () => safe(() => this.navigate(project.id)), 'li-project-title'); if (project.description) el(name, 'div', 'li-muted li-truncate', project.description.split('\n')[0]);
-      const issues = this.data.issues.filter(i => i.projectId === project.id); const done = issues.filter(i => i.status === 'closed').length; const percent = issues.length ? Math.round(done / issues.length * 100) : 0;
-      const progressCell = el(row, 'td'); const progress = el(progressCell, 'progress'); progress.max = 100; progress.value = percent; progress.setAttribute('aria-label', `${project.title} 完成 ${percent}%`); el(progressCell, 'span', 'li-muted', ` ${percent}%`);
-      el(row, 'td', '', `${done}/${issues.length}`); pill(el(row, 'td'), project.status); el(row, 'td', 'li-muted', project.dueDate || '—'); action(el(row, 'td'), '编辑', () => this.projectModal(project), 'li-subtle');
+    for (const group of groupedProjects) {
+      if (group.status) { const cell = el(el(body, 'tr', 'li-group'), 'td', '', STATUS_NAMES[group.status as ProjectStatus]); cell.colSpan = 7; cell.dataset.projectGroup = group.status; }
+      for (const project of group.projects) {
+        const row = el(body, 'tr'); this.shareContextMenu(row, project.id, '项目'); this.projectDragHandle(el(row, 'td', 'li-project-handle-cell'), row, project, projects); const name = el(row, 'td'); action(name, project.title, () => safe(() => this.navigate(project.id)), 'li-project-title'); if (project.description) el(name, 'div', 'li-muted li-truncate', project.description.split('\n')[0]);
+        const issues = this.data.issues.filter(i => i.projectId === project.id); const done = issues.filter(i => i.status === 'closed').length; const percent = issues.length ? Math.round(done / issues.length * 100) : 0;
+        const progressCell = el(row, 'td'); const progress = el(progressCell, 'progress'); progress.max = 100; progress.value = percent; progress.setAttribute('aria-label', `${project.title} 完成 ${percent}%`); el(progressCell, 'span', 'li-muted', ` ${percent}%`);
+        el(row, 'td', '', `${done}/${issues.length}`); pill(el(row, 'td'), project.status); el(row, 'td', 'li-muted', project.dueDate || '—'); action(el(row, 'td'), '编辑', () => this.projectModal(project), 'li-subtle');
+      }
     }
     this.hideColumns(table, ['', '', 'progress', 'count', 'status', 'due', ''], this.projectFields);
     if (!projects.length) el(root, 'p', 'li-empty', archived.length ? '没有进行中的项目，已归档的在下方。' : '没有匹配的项目。');
@@ -520,12 +536,12 @@ export class IssuesView extends ItemView {
   }
   /** Archived projects leave the working list; they live in one collapsible strip with revive and delete. */
   private renderArchived(root: HTMLElement, projects: Project[]) {
-    if (!projects.length) return;
     const box = el(root, 'details', 'li-archived');
     box.open = this.state === 'archived';
-    el(box, 'summary', '', `已归档 · ${projects.length} 个项目`);
+    el(box, 'summary', '', `已归档 · ${projects.length} 个项目`).dataset.projectGroup = 'archived';
     for (const project of projects) {
       const row = el(box, 'div', 'li-archived-row');
+      this.projectDragHandle(row, row, project, this.data.projects);
       const info = el(row, 'div', 'li-archived-info');
       action(info, project.title, () => safe(() => this.navigate(project.id)), 'li-project-title');
       const issues = this.data.issues.filter(i => i.projectId === project.id);
@@ -595,7 +611,6 @@ export class IssuesView extends ItemView {
       const tools = el(root, 'div', 'li-toolbar');
       select(tools, [['updated', '最近更新'], ['created', '最早创建'], ['title', '标题'], ['due', '截止日期']], this.sort, value => { this.sort = value; safe(() => this.draw()); });
       select(tools, [['', '不分组'], ['status', '按状态'], ['milestone', '按里程碑'], ['label', '按标签']], this.group, value => { this.group = value; safe(() => this.draw()); });
-      this.fieldsButton(tools, this.issueFields, [['status', '状态'], ['labels', '标签'], ['milestone', '里程碑'], ['assignees', '负责人'], ['due', '截止日期']]);
     }
     const matching = all.filter(i => this.matches(i));
     const filtered = matching.filter(i => this.mode === 'board' || (this.issueState === 'closed' ? i.status === 'closed' : i.status !== 'closed')).sort((a, b) => this.sort === 'title' ? a.title.localeCompare(b.title) : this.sort === 'created' ? a.createdAt.localeCompare(b.createdAt) : this.sort === 'due' ? (a.dueDate || '9999').localeCompare(b.dueDate || '9999') : b.updatedAt.localeCompare(a.updatedAt));
@@ -614,7 +629,7 @@ export class IssuesView extends ItemView {
     if (!filtered.length) { const empty = el(root, 'div', 'li-empty'); el(empty, 'h3', '', !all.length ? '这个项目还没有 Issues' : this.issueState === 'closed' && !matching.some(i => i.status === 'closed') ? '没有已关闭的 Issues' : this.issueState === 'open' && !matching.some(i => i.status !== 'closed') ? '没有开启的 Issues' : '没有匹配的 Issues'); action(empty, '新建 Issue', () => this.issueModal(project), 'mod-cta', 'plus'); return; }
     if (this.mode === 'board') { const board = el(root, 'div', 'li-board'); for (const status of ISSUE_STATUSES) { const column = el(board, 'section', 'li-board-column'); const issues = filtered.filter(i => i.status === status); const header = el(column, 'div', 'li-board-header'); pill(header, status); el(header, 'span', 'li-muted', String(issues.length)); const add = action(header, '', () => this.issueModal(project, undefined, { status }), 'li-subtle li-icon-button', 'plus'); add.setAttribute('aria-label', `新建${STATUS_NAMES[status]} Issue`); add.title = `新建${STATUS_NAMES[status]} Issue`; column.addEventListener('dragover', event => { event.preventDefault(); column.addClass('is-dragover'); }); column.addEventListener('dragleave', () => column.removeClass('is-dragover')); column.addEventListener('drop', event => { event.preventDefault(); column.removeClass('is-dragover'); const id = event.dataTransfer?.getData('text/local-issues'); if (id) safe(async () => { await this.host.store.updateIssue(id, { status, actor: this.host.author }); await this.draw(); }); }); for (const issue of issues) this.issueCard(column, issue, true); } return; }
     const groups = new Map<string, Issue[]>(); for (const issue of filtered) { const key = this.group === 'status' ? STATUS_NAMES[issue.status] : this.group === 'milestone' ? issue.milestone || '无里程碑' : this.group === 'label' ? issue.labels[0] || '无标签' : ''; groups.set(key, [...(groups.get(key) || []), issue]); }
-    for (const [name, issues] of groups) { if (name) el(root, 'h3', 'li-section-heading', `${name} · ${issues.length}`); if (this.mode === 'table') { const table = el(root, 'table', 'li-table li-issues-table'); const th = el(el(table, 'thead'), 'tr'); for (const name of ['', 'Issue', '状态', '标签', '里程碑', '负责人', '截止']) el(th, 'th', '', name); const body = el(table, 'tbody'); for (const issue of issues) { const row = el(body, 'tr'); this.tapCard(row, () => this.navigate(project.id, issue.id)); this.shareContextMenu(row, issue.id, '议题'); this.checkbox(el(row, 'td'), issue); action(el(row, 'td'), `#${issue.number} ${issue.title}`, () => safe(() => this.navigate(project.id, issue.id)), 'li-issue-title'); pill(el(row, 'td'), issue.status, issue.closeReason); el(row, 'td', '', issue.labels.join('、') || '—'); el(row, 'td', '', issue.milestone || '—'); el(row, 'td', '', issue.assignees.join('、') || '—'); el(row, 'td', '', issue.dueDate || '—'); } this.hideColumns(table, ['', '', 'status', 'labels', 'milestone', 'assignees', 'due'], this.issueFields); } else { const list = el(root, 'div', 'li-issue-list'); for (const issue of issues) this.issueCard(list, issue); } }
+    for (const [name, issues] of groups) { if (name) el(root, 'h3', 'li-section-heading', `${name} · ${issues.length}`); if (this.mode === 'table') { const table = el(root, 'table', 'li-table li-issues-table'); const th = el(el(table, 'thead'), 'tr'); for (const name of ['', 'Issue', '状态', '标签', '里程碑', '负责人', '截止']) el(th, 'th', '', name); const body = el(table, 'tbody'); for (const issue of issues) { const row = el(body, 'tr'); this.tapCard(row, () => this.navigate(project.id, issue.id)); this.shareContextMenu(row, issue.id, '议题'); this.checkbox(el(row, 'td'), issue); action(el(row, 'td'), `#${issue.number} ${issue.title}`, () => safe(() => this.navigate(project.id, issue.id)), 'li-issue-title'); pill(el(row, 'td'), issue.status, issue.closeReason); el(row, 'td', '', issue.labels.join('、') || '—'); el(row, 'td', '', issue.milestone || '—'); el(row, 'td', '', issue.assignees.join('、') || '—'); el(row, 'td', '', issue.dueDate || '—'); } } else { const list = el(root, 'div', 'li-issue-list'); for (const issue of issues) this.issueCard(list, issue); } }
   }
   private renderBatch(root: HTMLElement, issues: Issue[], milestones: string[], labels: string[]) {
     const visible = new Set(issues.map(issue => issue.id));

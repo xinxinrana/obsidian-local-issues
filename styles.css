@@ -527,3 +527,6 @@ body:has(.li-no-tooltips:hover) .tooltip,
 .local-issues .li-drop-before { box-shadow: inset 0 2px var(--interactive-accent); }
 .local-issues .li-drop-after { box-shadow: inset 0 -2px var(--interactive-accent); }
 .is-mobile .local-issues button.li-project-drag-handle { width: 44px; min-width: 44px; height: 44px; flex: 0 0 44px; }
+.local-issues [data-project-group].li-drop-after { background: var(--background-modifier-hover); color: var(--text-accent); }
+
+.local-issues .li-projects .li-group > td { text-align: start; font-weight: 600; color: var(--text-muted); background: var(--background-secondary); }

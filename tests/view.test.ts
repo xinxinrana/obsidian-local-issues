@@ -217,8 +217,8 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     assert.equal(view.contentEl.querySelector('.li-state-tab.is-active').getAttribute('aria-pressed'), 'true');
     click('表格'); await until(() => !!view.contentEl.querySelector('.li-issues-table'), '表格视图');
     assert.match(view.contentEl.querySelector('.li-issues-table').textContent, /修改后的标题/);
-    click('字段'); menuAction('负责人');
-    await until(() => view.contentEl.querySelectorAll('.li-issues-table th')[5].hidden, '隐藏字段');
+    assert.ok(![...view.contentEl.querySelectorAll('button')].some(button => button.textContent === '字段'), '议题页不再提供字段配置');
+    assert.ok([...view.contentEl.querySelectorAll('.li-issues-table th')].every(cell => !cell.hidden), '议题表格固定显示全部字段');
     const search = view.contentEl.querySelector('input[aria-label="搜索 Issues"]');
     assert.ok(search.closest('.li-search-row')); assert.ok(!search.closest('.li-toolbar'));
     const filters = view.contentEl.querySelector('details.li-advanced-filters'); assert.ok(filters); assert.equal(filters.open, false);
@@ -531,6 +531,14 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     assert.ok(!view.contentEl.querySelector('.li-archived-row'), '删除后归档区消失');
     const movingProject = await store.createProject({ title: '移动目标' });
     const movingSource = await store.createProject({ title: '移动来源' });
+    await store.updateProject(movingProject.id, { status: 'completed' });
+    await view.setState({ group: 'status', projectSort: 'title' }, { history: false });
+    await view.navigate();
+    const dragHandle = view.contentEl.querySelector<HTMLButtonElement>(`[aria-label="拖动项目：${movingSource.title}"]`)!;
+    dragHandle.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+    await until(async () => (await store.getProject(movingSource.id)).status === 'completed', '跨分组拖动入口同步项目状态');
+    assert.equal(view.getState().group, 'status', '移动后保留分组');
+    assert.ok(view.contentEl.querySelector('[data-project-group="paused"]'), '空分组也保留拖放入口');
     const moving = await store.createIssue(movingSource.id, { title: '从界面移动与删除', body: '保留正文' });
     await store.addComment(moving.id, '保留讨论');
     await view.navigate(movingSource.id, moving.id);
