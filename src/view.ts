@@ -46,10 +46,12 @@ const stateValue = (issue: Pick<Issue, 'status' | 'closeReason'>) => issue.statu
 const statePatch = (value: string): IssuePatch => value === 'open' ? { status: 'open' } : { status: 'closed', closeReason: value as CloseReason };
 interface IssueViewState { creating?: { projectId: string; defaults: Partial<IssueInput> }; projectId?: string; issueId?: string; query?: string; projectState?: string; issueState?: 'open' | 'closed'; mode?: 'list' | 'board' | 'table'; label?: string; milestone?: string; sort?: string; projectSort?: string; group?: string; }
 
+type IssueViewPosition = { scrollTop?: number; boardScroll?: number[] };
+
 export class IssuesView extends ItemView {
   private projectId?: string;
   private issueId?: string;
-  private listPosition?: { projectId: string; issueId: string; scrollTop: number; order: string[] };
+  private listPosition?: IssueViewPosition & { projectId: string; issueId: string; order: string[] };
   private creating?: { projectId: string; defaults: Partial<IssueInput> };
   private activeEdit?: { element: HTMLElement; label: string; dirty: () => boolean; discard: () => void };
   private discardPrompt?: Modal;
@@ -121,8 +123,19 @@ export class IssuesView extends ItemView {
   }
   async onClose() { this.closed = true; ++this.generation; this.disposeViewport?.(); this.disposeViewport = undefined; this.disposeTrackpad?.(); this.disposeTrackpad = undefined; this.deletePrompt?.close(); this.relationPicker?.close(); this.submissionNotice?.hide(); this.discardPrompt?.close(); this.stopEditing(); this.captureDrafts(); this.renderScope.unload(); }
   getState() { return { projectId: this.projectId, issueId: this.issueId, creating: this.creating, query: this.query, projectState: this.state, issueState: this.issueState, mode: this.mode, label: this.label, milestone: this.milestone, sort: this.sort, projectSort: this.projectSort, group: this.group }; }
-  getEphemeralState() { return { scrollTop: (this.phone?.content || this.contentEl).scrollTop }; }
-  setEphemeralState(state: { scrollTop?: number }) { if (typeof state?.scrollTop === 'number' && Number.isFinite(state.scrollTop)) (this.phone?.content || this.contentEl).scrollTop = Math.max(0, state.scrollTop); }
+  getEphemeralState(): IssueViewPosition {
+    return {
+      scrollTop: (this.phone?.content || this.contentEl).scrollTop,
+      boardScroll: [...this.contentEl.querySelectorAll<HTMLElement>('.li-desktop .li-board-cards')].map(lane => lane.scrollTop),
+    };
+  }
+  setEphemeralState(state: IssueViewPosition) {
+    if (typeof state?.scrollTop === 'number' && Number.isFinite(state.scrollTop)) (this.phone?.content || this.contentEl).scrollTop = Math.max(0, state.scrollTop);
+    this.contentEl.querySelectorAll<HTMLElement>('.li-desktop .li-board-cards').forEach((lane, index) => {
+      const offset = state?.boardScroll?.[index];
+      if (typeof offset === 'number' && Number.isFinite(offset)) lane.scrollTop = Math.max(0, offset);
+    });
+  }
   private captureDrafts() { for (const binding of this.bindings) binding.save(); }
   private get editingInline() {
     if (this.activeEdit && !this.contentEl.contains(this.activeEdit.element)) this.stopEditing(true);
@@ -751,7 +764,14 @@ export class IssuesView extends ItemView {
       else if (this.issueState === 'open') action(empty, '新建 Issue', () => this.issueModal(project), 'mod-cta', 'plus');
       return;
     }
-    if (this.mode === 'board') { const board = el(root, 'div', 'li-board'); for (const status of ISSUE_STATUSES) { const column = el(board, 'section', 'li-board-column'); const issues = filtered.filter(i => i.status === status); const header = el(column, 'div', 'li-board-header'); pill(header, status); el(header, 'span', 'li-muted', String(issues.length)); const add = action(header, '', () => this.issueModal(project, undefined, { status }), 'li-subtle li-icon-button', 'plus'); add.setAttribute('aria-label', `新建${STATUS_NAMES[status]} Issue`); add.title = `新建${STATUS_NAMES[status]} Issue`; column.addEventListener('dragover', event => { event.preventDefault(); column.addClass('is-dragover'); }); column.addEventListener('dragleave', () => column.removeClass('is-dragover')); column.addEventListener('drop', event => { event.preventDefault(); column.removeClass('is-dragover'); const id = event.dataTransfer?.getData('text/local-issues'); if (id) safe(async () => { await this.host.store.updateIssue(id, { status, actor: this.host.author }); await this.draw(); }); }); for (const issue of issues) this.issueCard(column, issue, true); } return; }
+    if (this.mode === 'board') { const board = el(root, 'div', 'li-board'); for (const status of ISSUE_STATUSES) { const column = el(board, 'section', 'li-board-column'); const issues = filtered.filter(i => i.status === status); const header = el(column, 'div', 'li-board-header'); pill(header, status); el(header, 'span', 'li-muted', String(issues.length)); const add = action(header, '', () => this.issueModal(project, undefined, { status }), 'li-subtle li-icon-button', 'plus'); add.setAttribute('aria-label', `新建${STATUS_NAMES[status]} Issue`); add.title = `新建${STATUS_NAMES[status]} Issue`; column.addEventListener('dragover', event => { event.preventDefault(); column.addClass('is-dragover'); }); column.addEventListener('dragleave', () => column.removeClass('is-dragover')); column.addEventListener('drop', event => { event.preventDefault(); column.removeClass('is-dragover'); const id = event.dataTransfer?.getData('text/local-issues'); if (id) safe(async () => { await this.host.store.updateIssue(id, { status, actor: this.host.author }); await this.draw(); }); }); const cards = this.phone ? column : el(column, 'div', 'li-board-cards');
+      if (!this.phone) {
+        cards.tabIndex = 0;
+        cards.setAttribute('role', 'region');
+        cards.setAttribute('aria-label', `${STATUS_NAMES[status]}议题`);
+        if (!issues.length) el(cards, 'p', 'li-muted li-board-empty', '暂无议题');
+      }
+      for (const issue of issues) this.issueCard(cards, issue, true); } return; }
     const groups = new Map<string, Issue[]>(); for (const issue of filtered) { const key = this.group === 'status' ? STATUS_NAMES[issue.status] : this.group === 'milestone' ? issue.milestone || '无里程碑' : this.group === 'label' ? issue.labels[0] || '无标签' : ''; groups.set(key, [...(groups.get(key) || []), issue]); }
     for (const [name, issues] of groups) { if (name) el(root, 'h3', 'li-section-heading', `${name} · ${issues.length}`); if (this.mode === 'table') { const table = el(root, 'table', 'li-table li-issues-table'); const th = el(el(table, 'thead'), 'tr'); for (const name of ['', 'Issue', '状态', '标签', '里程碑', '负责人', '截止']) el(th, 'th', '', name); const body = el(table, 'tbody'); for (const issue of issues) { const row = el(body, 'tr'); row.dataset.issueRow = issue.id; this.tapCard(row, () => this.navigate(project.id, issue.id)); this.shareContextMenu(row, issue.id, '议题'); this.checkbox(el(row, 'td'), issue); action(el(row, 'td'), `#${issue.number} ${issue.title}`, () => safe(() => this.navigate(project.id, issue.id)), 'li-issue-title'); pill(el(row, 'td'), issue.status, issue.closeReason); el(row, 'td', '', issue.labels.join('、') || '—'); el(row, 'td', '', issue.milestone || '—'); el(row, 'td', '', issue.assignees.join('、') || '—'); el(row, 'td', '', issue.dueDate || '—'); } } else { const list = el(root, 'div', 'li-issue-list'); for (const issue of issues) this.issueCard(list, issue); } }
   }
