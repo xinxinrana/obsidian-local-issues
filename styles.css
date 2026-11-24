@@ -549,16 +549,20 @@ body:has(.li-no-tooltips:hover) .tooltip,
 .local-issues .li-desktop .li-workbar button.li-tab.is-active { background: var(--background-primary); border-color: var(--li-border); color: var(--text-normal); }
 .local-issues .li-desktop .li-workbar .li-search-row { flex: 1 1 180px; flex-wrap: nowrap; gap: 4px; max-width: 400px; margin: 0; padding: 0 4px 0 8px; background: var(--background-primary); border: 1px solid var(--li-border); border-radius: 6px; color: var(--text-muted); }
 .local-issues .li-desktop .li-workbar .li-search-row input { flex: 1; width: 0; min-width: 0; height: 32px; padding: 0 4px; border: 0; background: transparent; }
-.local-issues .li-desktop .li-workbar .li-advanced-filters { display: contents; }
-.local-issues .li-desktop .li-workbar .li-advanced-filters summary { display: inline-flex; gap: 6px; align-items: center; min-height: 32px; padding: 0 8px; border-radius: 6px; white-space: nowrap; }
-.local-issues .li-desktop .li-advanced-filters[open] summary { background: var(--li-accent-wash); color: var(--text-normal); }
-.local-issues .li-desktop .li-workbar .li-filter-grid { flex: 1 0 100%; margin: 0; padding: 10px 6px 6px; border-top: 1px solid var(--li-border); grid-template-columns: repeat(auto-fit, minmax(min(100%, 130px), 1fr)); }
+.local-issues .li-desktop .li-filter-toggle { min-height: 32px; padding: 0 8px; border-radius: 6px; white-space: nowrap; }
+.local-issues .li-desktop .li-filter-toggle[aria-expanded="true"] { background: var(--li-accent-wash); color: var(--text-normal); }
+.local-issues .li-desktop .li-advanced-filters { margin: 6px 0 0; padding: 10px 12px; border: 1px solid var(--li-border); border-radius: 8px; background: var(--li-surface); grid-template-columns: repeat(auto-fit,minmax(min(100%,130px),1fr)); min-width: 0; }
+.local-issues .li-desktop .li-advanced-filters .li-select-control { width: 100%; }
+.local-issues .li-desktop .li-workbar .li-search-row input:is(:focus,:focus-visible) { outline: 0; box-shadow: none; }
+.local-issues .li-desktop .li-workbar .li-search-row:has(input:focus) { border-color: var(--text-muted); }
 .local-issues .li-desktop .li-active-filters { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 4px; }
 .local-issues .li-desktop button.li-filter-chip { height: auto; min-height: 28px; max-width: 100%; padding: 4px 8px; border: 0; border-radius: 6px; box-shadow: none; background: var(--li-accent-wash); color: var(--text-accent); white-space: normal; overflow-wrap: anywhere; text-align: start; font-size: var(--font-ui-small); }
 .local-issues .li-desktop .li-tappable { cursor: pointer; }
 .local-issues .li-desktop .li-issue-row.is-selected, .local-issues .li-desktop .li-issues-table tr:has(input:checked), .local-issues .li-desktop .li-batch:has(button) { background: var(--li-accent-wash); }
 .local-issues .li-desktop .li-batch { padding-inline: 10px; border-radius: 8px; }
-.local-issues .li-desktop .li-issue-number { font-variant-numeric: tabular-nums; font-weight: 600; }
+.local-issues .li-desktop .li-issue-number { color: var(--text-muted); font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+.local-issues .li-desktop .li-issue-title-row { display: grid; grid-template-columns: minmax(4ch,max-content) minmax(0,1fr); align-items: baseline; gap: 8px; }
+.local-issues .li-desktop .li-issue-title-row button { justify-self: start; }
 .local-issues .li-desktop .li-issue-meta { align-items: center; gap: 3px 10px; margin-top: 3px; overflow-wrap: anywhere; }
 .local-issues .li-desktop .li-issue-meta .li-icon, .local-issues .li-desktop .li-issue-meta .li-icon svg { width: 13px; height: 13px; flex-basis: 13px; }
 .local-issues .li-desktop .li-issue-title-row button { min-height: 26px; }
@@ -595,7 +599,6 @@ body:has(.li-no-tooltips:hover) .tooltip,
 @container local-issues (min-width: 920px) {
   .local-issues .li-desktop .li-issue-row .li-issue-content { display: grid; grid-template-columns: minmax(250px,1fr) minmax(280px,42%); align-items: center; gap: 16px; }
   .local-issues .li-desktop .li-issue-row .li-issue-meta { margin: 0; }
-  .local-issues .li-desktop .li-issue-row .li-issue-number { min-width: 4ch; }
 }
 .local-issues .li-desktop .li-board-column { padding: 10px; min-height: 152px; }
 .local-issues .li-desktop .li-board-header { margin-bottom: 8px; }

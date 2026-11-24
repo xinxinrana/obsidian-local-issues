@@ -221,7 +221,14 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     assert.ok([...view.contentEl.querySelectorAll('.li-issues-table th')].every(cell => !cell.hidden), '议题表格固定显示全部字段');
     const search = view.contentEl.querySelector('input[aria-label="搜索 Issues"]');
     assert.ok(search.closest('.li-search-row')); assert.ok(!search.closest('.li-toolbar'));
-    const filters = view.contentEl.querySelector('details.li-advanced-filters'); assert.ok(filters); assert.equal(filters.open, false);
+    const filters = view.contentEl.querySelector('.li-advanced-filters'); assert.ok(filters); assert.equal(filters.hidden, true);
+    const filterToggle = view.contentEl.querySelector('.li-filter-toggle');
+    filterToggle.click();
+    assert.equal(filterToggle.getAttribute('aria-expanded'), 'true');
+    assert.equal(filters.hidden, false);
+    assert.equal(filterToggle.closest('.li-workbar').nextElementSibling, filters);
+    filterToggle.click();
+    assert.equal(filters.hidden, true);
     assert.deepEqual([...filters.querySelectorAll('select')].map(control => control.getAttribute('aria-label')), ['标签', '里程碑', '排序', '分组']);
     const oldSearchTable = view.contentEl.querySelector('.li-issues-table');
     search.value = '修改过的评论'; search.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
@@ -244,7 +251,11 @@ test('real view supports project → issue → Markdown comments, pasted and dro
     const child = (await store.snapshot()).issues.find(i => i.title === '子议题')!; assert.equal(child.parent, issue.id); assert.deepEqual(child.dependencies, [issue.id]);
     await view.navigate(); await view.navigate(project.id); click('Issues'); await until(() => !!view.contentEl.querySelector('.li-issue-list'), '默认状态');
     assert.match(view.contentEl.querySelector('.li-state-tabs').textContent, /1 个开启.*1 个已关闭/);
-    assert.match(view.contentEl.querySelector('.li-issue-list').textContent, /子议题/); assert.doesNotMatch(view.contentEl.querySelector('.li-issue-list').textContent, /修改后的标题/);
+    assert.match(view.contentEl.querySelector('.li-issue-list').textContent, /子议题/);
+    const issueTitle = view.contentEl.querySelector('.li-issue-list .li-issue-title-row');
+    assert.equal(issueTitle.firstElementChild.textContent, `#${child.number}`);
+    assert.equal(issueTitle.lastElementChild.textContent, '子议题');
+    assert.doesNotMatch(view.contentEl.querySelector('.li-issue-list').textContent, /修改后的标题/);
     click('1 个已关闭'); await until(() => view.contentEl.querySelector('.li-issue-list')?.textContent.includes('修改后的标题'), '切换已关闭列表');
     click('1 个开启'); await until(() => view.contentEl.querySelector('.li-issue-list')?.textContent.includes('子议题'), '切换开启列表');
     await view.navigate(project.id, issue.id); assert.match(view.contentEl.querySelector('.li-relations').textContent, /子议题/);

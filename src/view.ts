@@ -689,16 +689,24 @@ export class IssuesView extends ItemView {
         tab.setAttribute('aria-pressed', String(this.mode === mode));
       }
       this.desktopSearch(workbar, '搜索议题', '搜索 Issues');
-      const filters = el(workbar, 'details', 'li-advanced-filters');
-      const toggle = el(filters, 'summary', '', '筛选与排序');
-      prependIcon(toggle, 'sliders-horizontal');
-      const filterFields = el(filters, 'div', 'li-filter-grid');
+      const filterId = `li-filters-${++controlId}`;
+      const toggle = action(workbar, '筛选与排序', () => {
+        filterFields.hidden = !filterFields.hidden;
+        toggle.setAttribute('aria-expanded', String(!filterFields.hidden));
+      }, 'li-subtle li-filter-toggle', 'sliders-horizontal');
+      toggle.setAttribute('aria-controls', filterId);
+      toggle.setAttribute('aria-expanded', 'false');
+      const filterFields = el(root, 'div', 'li-filter-grid li-advanced-filters');
+      filterFields.id = filterId;
+      filterFields.hidden = true;
       const update = (name: string, set: (value: string) => void) => (value: string) => safe(async () => {
         set(value);
         await this.draw();
-        const replacement = this.contentEl.querySelector<HTMLDetailsElement>('.li-advanced-filters');
-        if (!replacement) return;
-        replacement.open = true;
+        const replacement = this.contentEl.querySelector<HTMLElement>('.li-advanced-filters');
+        const replacementToggle = this.contentEl.querySelector<HTMLButtonElement>('.li-filter-toggle');
+        if (!replacement || !replacementToggle) return;
+        replacement.hidden = false;
+        replacementToggle.setAttribute('aria-expanded', 'true');
         [...replacement.querySelectorAll('select')].find(control => control.getAttribute('aria-label') === name)?.focus({ preventScroll: true });
       });
       select(this.field(filterFields, '标签'), [['', '所有标签'], ...labels.map(s => [s, s] as [string, string])], this.label, update('标签', value => { this.label = value; }));
@@ -838,11 +846,11 @@ export class IssuesView extends ItemView {
     const title = el(content, 'div', 'li-issue-title-row');
     const mobile = Platform.isMobile;
     if (mobile && !board) pill(title, issue.status, issue.closeReason);
+    if (!mobile) el(title, 'span', 'li-issue-number', `#${issue.number}`);
     action(title, issue.title, () => safe(() => this.navigate(issue.projectId, issue.id)), 'li-issue-title');
     const meta = el(content, 'div', 'li-muted li-issue-meta');
     if (mobile) el(meta, 'span', '', `#${issue.number} · ${issue.author} · ${date(issue.updatedAt)}`);
     else {
-      el(meta, 'span', 'li-issue-number', `#${issue.number}`);
       if (!board) pill(meta, issue.status, issue.closeReason);
       el(meta, 'span', '', issue.author);
       el(meta, 'span', '', date(issue.updatedAt));
