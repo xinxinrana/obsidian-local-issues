@@ -553,8 +553,6 @@ body:has(.li-no-tooltips:hover) .tooltip,
 .local-issues .li-desktop .li-filter-toggle[aria-expanded="true"] { background: var(--li-accent-wash); color: var(--text-normal); }
 .local-issues .li-desktop .li-advanced-filters { margin: 6px 0 0; padding: 10px 12px; border: 1px solid var(--li-border); border-radius: 8px; background: var(--li-surface); grid-template-columns: repeat(auto-fit,minmax(min(100%,130px),1fr)); min-width: 0; }
 .local-issues .li-desktop .li-advanced-filters .li-select-control { width: 100%; }
-.local-issues .li-desktop .li-workbar .li-search-row input:is(:focus,:focus-visible) { outline: 0; box-shadow: none; }
-.local-issues .li-desktop .li-workbar .li-search-row:has(input:focus) { border-color: var(--text-muted); }
 .local-issues .li-desktop .li-active-filters { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 4px; }
 .local-issues .li-desktop button.li-filter-chip { height: auto; min-height: 28px; max-width: 100%; padding: 4px 8px; border: 0; border-radius: 6px; box-shadow: none; background: var(--li-accent-wash); color: var(--text-accent); white-space: normal; overflow-wrap: anywhere; text-align: start; font-size: var(--font-ui-small); }
 .local-issues .li-desktop .li-tappable { cursor: pointer; }
@@ -574,7 +572,19 @@ body:has(.li-no-tooltips:hover) .tooltip,
 .local-issues .li-desktop .li-timeline > h3 { border-top: 1px solid var(--li-border); padding-top: 14px; }
 .local-issues .li-desktop .li-sidebar > h3 { font-size: var(--font-ui-medium); }
 .local-issues .li-desktop .li-editor-tabs button.is-active { background: var(--li-accent-wash); }
-.local-issues .li-desktop :is(a,summary):focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: 2px; border-radius: 4px; }
+body:not(.is-mobile) :is(.local-issues .li-desktop,.li-modal-container,.li-settings-modal,.li-settings) :is(button,input,select,textarea,a,summary,[tabindex]):focus {
+  outline: none;
+  box-shadow: none;
+}
+body:not(.is-mobile) :is(.local-issues .li-desktop,.li-modal-container,.li-settings-modal,.li-settings) :is(button,input,select,textarea,a,summary,[tabindex]):focus-visible {
+  outline: 1px solid var(--text-muted);
+  outline-offset: 1px;
+}
+.local-issues .li-desktop .li-workbar .li-search-row input:is(:focus,:focus-visible) { outline: 0; box-shadow: none; }
+.local-issues .li-desktop .li-workbar .li-search-row:has(input:focus) { border-color: var(--text-muted); }
+.local-issues .li-desktop .li-editor:focus-within:not(.is-dragover),
+.local-issues .li-desktop .li-comment:has(.li-editor:focus-within):not(:has(.li-editor.is-dragover)) { border-color: var(--text-muted); }
+.local-issues .li-desktop .li-detail-resizer:focus-visible:not(.is-resizing)::before { background: var(--text-muted); }
 @container local-issues (min-width: 680px) {
   .local-issues .li-desktop .li-board { grid-template-columns: repeat(2,minmax(0,1fr)); }
 }
