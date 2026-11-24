@@ -556,7 +556,7 @@ body:has(.li-no-tooltips:hover) .tooltip,
 .local-issues .li-desktop .li-active-filters { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 4px; }
 .local-issues .li-desktop button.li-filter-chip { height: auto; min-height: 28px; max-width: 100%; padding: 4px 8px; border: 0; border-radius: 6px; box-shadow: none; background: var(--li-accent-wash); color: var(--text-accent); white-space: normal; overflow-wrap: anywhere; text-align: start; font-size: var(--font-ui-small); }
 .local-issues .li-desktop .li-tappable { cursor: pointer; }
-.local-issues .li-desktop .li-issue-row.is-selected, .local-issues .li-desktop .li-issues-table tr:has(input:checked), .local-issues .li-desktop .li-batch:has(button) { background: var(--li-accent-wash); }
+.local-issues .li-desktop .li-issue-row.is-selected, .local-issues .li-desktop .li-issues-table tr:has(input:checked) { background: var(--li-accent-wash); }
 .local-issues .li-desktop .li-batch { padding-inline: 10px; border-radius: 8px; }
 .local-issues .li-desktop .li-issue-number { color: var(--text-muted); font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
 .local-issues .li-desktop .li-issue-title-row { display: grid; grid-template-columns: minmax(4ch,max-content) minmax(0,1fr); align-items: baseline; gap: 8px; }
@@ -600,6 +600,7 @@ body:not(.is-mobile) :is(.local-issues .li-desktop,.li-modal-container,.li-setti
 .local-issues .li-desktop .li-results-controls { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 4px 10px; margin: 10px 0; border-bottom: 1px solid var(--li-border); }
 .local-issues .li-desktop .li-results-controls .li-state-tabs { margin: 0; border: 0; }
 .local-issues .li-desktop .li-results-controls .li-batch { margin: 0; justify-content: flex-end; padding: 4px 8px; }
+.local-issues .li-desktop .li-results-controls .li-batch:has(button) { background: var(--li-surface); }
 .local-issues .li-desktop .li-results-controls :is(.li-batch:has(button),.li-batch-feedback) { grid-column: 1 / -1; justify-content: flex-start; margin-bottom: 6px; }
 .local-issues .li-desktop .li-issue-row { padding: 9px 14px; align-items: center; }
 .local-issues .li-desktop .li-issue-row input[type=checkbox] { margin: 0; }
