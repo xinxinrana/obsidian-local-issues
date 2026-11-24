@@ -530,3 +530,81 @@ body:has(.li-no-tooltips:hover) .tooltip,
 .local-issues [data-project-group].li-drop-after { background: var(--background-modifier-hover); color: var(--text-accent); }
 
 .local-issues .li-projects .li-group > td { text-align: start; font-weight: 600; color: var(--text-muted); background: var(--background-secondary); }
+
+.local-issues .li-desktop {
+  --li-surface: color-mix(in srgb, var(--background-secondary) 76%, var(--background-primary));
+  --li-accent-wash: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-primary));
+}
+.local-issues .li-desktop .li-topbar { gap: 8px; }
+.local-issues .li-desktop .li-current-issue { color: var(--text-muted); font-size: var(--font-ui-small); font-variant-numeric: tabular-nums; }
+.local-issues .li-desktop .li-heading h2, .local-issues .li-desktop .li-detail-title h1 { font-size: clamp(23px, 3.4cqi, 34px); font-weight: 680; letter-spacing: -.035em; }
+.local-issues .li-desktop .li-heading, .local-issues .li-desktop .li-detail-header { gap: 12px; }
+.local-issues .li-desktop .li-heading-actions > button, .local-issues .li-desktop .li-detail-actions > button { min-height: 32px; }
+.local-issues .li-desktop .li-project-about { margin-block: 10px; color: var(--text-muted); font-size: var(--font-ui-small); }
+.local-issues .li-desktop .li-project-about > summary { width: fit-content; padding: 6px 0; cursor: pointer; }
+.local-issues .li-desktop .li-project-about .li-markdown { max-width: 75ch; padding: 8px 0 0; }
+.local-issues .li-desktop .li-workbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 18px; padding: 6px; border: 1px solid var(--li-border); border-radius: 10px; background: var(--li-surface); }
+.local-issues .li-desktop .li-workbar .li-tabs { gap: 2px; flex: 0 0 auto; border: 0; margin: 0 auto 0 0; }
+.local-issues .li-desktop .li-workbar button.li-tab { height: 32px; padding: 0 9px; border: 1px solid transparent; border-radius: 6px; }
+.local-issues .li-desktop .li-workbar button.li-tab.is-active { background: var(--background-primary); border-color: var(--li-border); color: var(--text-normal); }
+.local-issues .li-desktop .li-workbar .li-search-row { flex: 1 1 180px; flex-wrap: nowrap; gap: 4px; max-width: 400px; margin: 0; padding: 0 4px 0 8px; background: var(--background-primary); border: 1px solid var(--li-border); border-radius: 6px; color: var(--text-muted); }
+.local-issues .li-desktop .li-workbar .li-search-row input { flex: 1; width: 0; min-width: 0; height: 32px; padding: 0 4px; border: 0; background: transparent; }
+.local-issues .li-desktop .li-workbar .li-advanced-filters { display: contents; }
+.local-issues .li-desktop .li-workbar .li-advanced-filters summary { display: inline-flex; gap: 6px; align-items: center; min-height: 32px; padding: 0 8px; border-radius: 6px; white-space: nowrap; }
+.local-issues .li-desktop .li-advanced-filters[open] summary { background: var(--li-accent-wash); color: var(--text-normal); }
+.local-issues .li-desktop .li-workbar .li-filter-grid { flex: 1 0 100%; margin: 0; padding: 10px 6px 6px; border-top: 1px solid var(--li-border); grid-template-columns: repeat(auto-fit, minmax(min(100%, 130px), 1fr)); }
+.local-issues .li-desktop .li-active-filters { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 4px; }
+.local-issues .li-desktop button.li-filter-chip { height: auto; min-height: 28px; max-width: 100%; padding: 4px 8px; border: 0; border-radius: 6px; box-shadow: none; background: var(--li-accent-wash); color: var(--text-accent); white-space: normal; overflow-wrap: anywhere; text-align: start; font-size: var(--font-ui-small); }
+.local-issues .li-desktop .li-tappable { cursor: pointer; }
+.local-issues .li-desktop .li-issue-row.is-selected, .local-issues .li-desktop .li-issues-table tr:has(input:checked), .local-issues .li-desktop .li-batch:has(button) { background: var(--li-accent-wash); }
+.local-issues .li-desktop .li-batch { padding-inline: 10px; border-radius: 8px; }
+.local-issues .li-desktop .li-issue-number { font-variant-numeric: tabular-nums; font-weight: 600; }
+.local-issues .li-desktop .li-issue-meta { align-items: center; gap: 3px 10px; margin-top: 3px; overflow-wrap: anywhere; }
+.local-issues .li-desktop .li-issue-meta .li-icon, .local-issues .li-desktop .li-issue-meta .li-icon svg { width: 13px; height: 13px; flex-basis: 13px; }
+.local-issues .li-desktop .li-issue-title-row button { min-height: 26px; }
+.local-issues .li-desktop .li-table th { background: var(--li-surface); }
+.local-issues .li-desktop .li-issue-summary .li-status { border: 0; border-radius: 6px; background: var(--li-surface); padding: 4px 8px; }
+.local-issues .li-desktop .li-description { border: 0; border-radius: 0; background: transparent; overflow: visible; }
+.local-issues .li-desktop .li-description > .li-comment-header { padding-inline: 0; background: transparent; border: 0; }
+.local-issues .li-desktop .li-description > .li-description-content > .li-markdown { max-width: 78ch; padding-inline: 0; padding-block: 8px 20px; line-height: 1.7; }
+.local-issues .li-desktop .li-timeline > h3 { border-top: 1px solid var(--li-border); padding-top: 14px; }
+.local-issues .li-desktop .li-sidebar > h3 { font-size: var(--font-ui-medium); }
+.local-issues .li-desktop .li-editor-tabs button.is-active { background: var(--li-accent-wash); }
+.local-issues .li-desktop :is(a,summary):focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: 2px; border-radius: 4px; }
+@container local-issues (min-width: 680px) {
+  .local-issues .li-desktop .li-board { grid-template-columns: repeat(2,minmax(0,1fr)); }
+}
+.local-issues .li-desktop .li-project-workbar { margin-bottom: 12px; }
+.local-issues .li-desktop .li-project-workbar .li-search-row { max-width: none; }
+.local-issues .li-desktop .li-project-workbar .li-toolbar { margin: 0; padding: 0; border: 0; }
+.local-issues .li-desktop .li-projects td:nth-child(2) { max-width: 400px; }
+.local-issues .li-desktop .li-projects td:nth-child(2) .li-truncate { max-width: min(35cqi, 360px); }
+.local-issues .li-desktop .li-issue-navigation { display: flex; gap: 2px; }
+.local-issues .li-desktop .li-issue-navigation button:disabled { opacity: .35; cursor: default; }
+.local-issues .li-desktop .li-comment:not(.li-description) .li-comment-header { background: var(--li-surface); }
+.local-issues .li-desktop .li-table tbody tr:focus-within, .local-issues .li-desktop .li-issue-row:focus-within { background: var(--li-accent-wash); }
+.local-issues .li-desktop .li-results-controls { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 4px 10px; margin: 10px 0; border-bottom: 1px solid var(--li-border); }
+.local-issues .li-desktop .li-results-controls .li-state-tabs { margin: 0; border: 0; }
+.local-issues .li-desktop .li-results-controls .li-batch { margin: 0; justify-content: flex-end; padding: 4px 8px; }
+.local-issues .li-desktop .li-results-controls :is(.li-batch:has(button),.li-batch-feedback) { grid-column: 1 / -1; justify-content: flex-start; margin-bottom: 6px; }
+.local-issues .li-desktop .li-issue-row { padding: 9px 14px; align-items: center; }
+.local-issues .li-desktop .li-issue-row input[type=checkbox] { margin: 0; }
+.local-issues .li-desktop .li-board { margin-top: 12px; }
+.local-issues .li-desktop .li-topbar .li-short-nav { min-height: 28px; }
+.local-issues .li-desktop .li-topbar .li-short-nav .li-icon { flex-basis: 13px; width: 13px; }
+@container local-issues (min-width: 920px) {
+  .local-issues .li-desktop .li-issue-row .li-issue-content { display: grid; grid-template-columns: minmax(250px,1fr) minmax(280px,42%); align-items: center; gap: 16px; }
+  .local-issues .li-desktop .li-issue-row .li-issue-meta { margin: 0; }
+  .local-issues .li-desktop .li-issue-row .li-issue-number { min-width: 4ch; }
+}
+.local-issues .li-desktop .li-board-column { padding: 10px; min-height: 152px; }
+.local-issues .li-desktop .li-board-header { margin-bottom: 8px; }
+.local-issues .li-desktop .li-board-header .li-muted { margin-inline-end: auto; font-variant-numeric: tabular-nums; }
+.local-issues .li-desktop .li-card { margin-bottom: 6px; }
+@container local-issues (max-width: 510px) {
+  .local-issues .li-desktop .li-workbar .li-tabs { flex: 1 0 100%; }
+  .local-issues .li-desktop .li-workbar .li-search-row { flex-basis: 100px; }
+  .local-issues .li-desktop .li-project-workbar .li-toolbar { flex: 1 0 100%; }
+  .local-issues .li-desktop .li-results-controls .li-state-tabs { gap: 8px; }
+  .local-issues .li-desktop .li-state-tab .li-icon { display: none; }
+}

@@ -49,6 +49,7 @@ interface IssueViewState { creating?: { projectId: string; defaults: Partial<Iss
 export class IssuesView extends ItemView {
   private projectId?: string;
   private issueId?: string;
+  private listPosition?: { projectId: string; issueId: string; scrollTop: number; order: string[] };
   private creating?: { projectId: string; defaults: Partial<IssueInput> };
   private activeEdit?: { element: HTMLElement; label: string; dirty: () => boolean; discard: () => void };
   private discardPrompt?: Modal;
@@ -220,7 +221,25 @@ export class IssuesView extends ItemView {
   async navigate(projectId?: string, issueId?: string) {
     await this.afterEditing(async () => {
       this.draftCache.suspend();
-      await this.leaf.setViewState({ type: VIEW_TYPE, state: { ...this.getState(), projectId, issueId, creating: undefined, query: '', projectState: '', label: '', milestone: '', ...(projectId !== this.projectId ? { group: '', issueState: 'open' } : {}) } });
+      const sameProject = !Platform.isMobile && !!projectId && projectId === this.projectId;
+      if (!sameProject) this.listPosition = undefined;
+      if (sameProject && issueId && !this.issueId && !this.creating) {
+        const rows = this.contentEl.querySelectorAll<HTMLElement>('[data-issue-row]');
+        this.listPosition = { projectId, issueId, ...this.getEphemeralState(), order: Array.from(rows, row => row.dataset.issueRow!) };
+      }
+      const restore = !issueId && !this.creating && this.listPosition?.projectId === projectId ? this.listPosition : undefined;
+      await this.leaf.setViewState({ type: VIEW_TYPE, state: {
+        ...this.getState(), projectId, issueId, creating: undefined,
+        ...(!sameProject ? { query: '', projectState: '', label: '', milestone: '' } : {}),
+        ...(projectId !== this.projectId ? { group: '', issueState: 'open' } : {}),
+      } });
+      if (restore) {
+        const target = [...this.contentEl.querySelectorAll<HTMLElement>('[data-issue-row]')]
+          .find(row => row.dataset.issueRow === restore.issueId)?.querySelector<HTMLElement>('.li-issue-title');
+        (target || this.contentEl.querySelector<HTMLElement>('.li-search-row input'))?.focus({ preventScroll: true });
+        this.setEphemeralState(restore);
+        this.listPosition = undefined;
+      }
     });
   }
   async refresh() {
@@ -234,9 +253,10 @@ export class IssuesView extends ItemView {
     if (this.editingInline || this.submittingComment || this.batching || this.layoutDragging) { this.pending = true; this.showPending(); return; }
     const sequence = ++this.generation;
     const data = await this.host.store.snapshot(); if (sequence !== this.generation) return;
+    const position = Platform.isMobile ? undefined : this.getEphemeralState();
     this.data = data; this.pending = false; this.captureDrafts(); this.renderScope.unload(); this.bindings.clear(); this.renderScope = new Component(); this.renderScope.load();
     this.contentEl.replaceChildren(); this.contentEl.addClass('local-issues');
-    const shell = el(this.contentEl, 'div', 'li-shell');
+    const shell = el(this.contentEl, 'div', Platform.isMobile ? 'li-shell' : 'li-shell li-desktop');
     const project = data.projects.find(p => p.id === this.projectId);
     let body: HTMLElement = shell;
     this.phone = Platform.isMobile ? mobilePage(shell) : undefined;
@@ -251,14 +271,48 @@ export class IssuesView extends ItemView {
       const top = el(shell, 'div', 'li-topbar');
       action(top, '项目', () => safe(() => this.navigate()), 'li-breadcrumb');
       if (project) { el(top, 'span', 'li-muted', '/'); action(top, project.title, () => safe(() => this.navigate(project.id)), 'li-breadcrumb'); }
-      action(top, '草稿', () => this.showDrafts(), 'li-subtle'); el(top, 'div', 'li-spacer'); action(top, '设置', () => this.host.openSettings(), 'li-subtle', 'settings');
+      const current = data.issues.find(i => i.id === this.issueId);
+      if (current) {
+        el(top, 'span', 'li-muted', '/');
+        el(top, 'span', 'li-current-issue', `#${current.number}`).setAttribute('aria-current', 'page');
+      }
+      el(top, 'div', 'li-spacer');
+      if (current) this.issueNavigation(top, current);
+      action(top, '草稿', () => this.showDrafts(), 'li-subtle');
+      action(top, '设置', () => this.host.openSettings(), 'li-subtle', 'settings');
     }
     if (data.warnings.length) { const details = el(body, 'details', 'li-warning'); el(details, 'summary', '', `${data.warnings.length} 个笔记需要检查`); for (const warning of data.warnings) el(details, 'div', '', warning); }
     if (this.creating && project && this.creating.projectId === project.id) this.issueModal(project, undefined, this.creating.defaults, body);
     else if (this.issueId) { const issue = data.issues.find(i => i.id === this.issueId); if (issue) this.renderIssue(body, issue); else { el(body, 'p', '', '此 Issue 已移动或不存在。'); action(body, '返回项目', () => safe(() => this.navigate(project?.id))); } }
     else if (project) this.renderProject(body, project);
     else this.renderProjects(body);
+    if (position) this.setEphemeralState(position);
     if (this.resumeOnDraw) { const key = this.resumeOnDraw; this.resumeOnDraw = undefined; this.openDraftEditor(key); }
+  }
+  private issueNavigation(top: HTMLElement, current: Issue) {
+    const position = this.listPosition;
+    if (!position || position.projectId !== current.projectId) return;
+    const issues = new Map(this.data.issues.filter(issue => issue.projectId === current.projectId).map(issue => [issue.id, issue]));
+    const order = position.order.flatMap(id => { const issue = issues.get(id); return issue ? [issue] : []; });
+    const index = order.findIndex(issue => issue.id === current.id);
+    if (index < 0 || order.length < 2) return;
+    const nav = el(top, 'nav', 'li-issue-navigation');
+    nav.setAttribute('aria-label', '浏览列表中的议题');
+    for (const [offset, label, icon] of [[-1, '上一条议题', 'chevron-left'], [1, '下一条议题', 'chevron-right']] as const) {
+      const destination = order[index + offset];
+      const button = action(nav, offset < 0 ? '上一条' : '下一条', () => {
+        if (!destination) return;
+        safe(async () => {
+          await this.navigate(destination.projectId, destination.id);
+          if (this.issueId !== destination.id) return;
+          const buttons = [...this.contentEl.querySelectorAll<HTMLButtonElement>('.li-issue-navigation button:not(:disabled)')];
+          (buttons.find(button => button.getAttribute('aria-label') === label) || buttons[0])?.focus({ preventScroll: true });
+        });
+      }, 'li-subtle li-short-nav', icon);
+      button.disabled = !destination;
+      button.setAttribute('aria-label', label);
+      button.title = destination ? `${label}：${destination.title}` : label;
+    }
   }
   private markdown(parent: HTMLElement, body: string, path: string) {
     const node = el(parent, 'div', 'li-markdown markdown-rendered');
@@ -458,6 +512,27 @@ export class IssuesView extends ItemView {
     });
     row.setAttribute('data-project-row', 'true');
   }
+  private desktopSearch(parent: HTMLElement, placeholder: string, label = placeholder) {
+    const form = el(parent, 'form', 'li-search-row');
+    prependIcon(form, 'search');
+    const search = input(form, placeholder, this.query);
+    search.type = 'search';
+    search.setAttribute('aria-label', label);
+    const submit = () => {
+      if (search.value === this.query) return;
+      this.query = search.value;
+      safe(async () => {
+        await this.draw();
+        if (document.activeElement === document.body) this.contentEl.querySelector<HTMLInputElement>('.li-workbar input[type="search"]')?.focus({ preventScroll: true });
+      });
+    };
+    action(form, '', submit, 'li-subtle li-icon-button', 'arrow-right').setAttribute('aria-label', '执行搜索');
+    form.addEventListener('submit', event => { event.preventDefault(); submit(); });
+    search.addEventListener('keydown', event => {
+      if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); submit(); }
+    });
+    search.addEventListener('search', () => { if (!search.value) submit(); });
+  }
   private mobileSearch(placeholder: string, project?: Project) {
     const row = el(this.phone!.controls, 'form', 'li-mobile-search');
     const search = input(row, placeholder, this.query); search.type = 'search'; search.enterKeyHint = 'search'; search.dataset.editor = 'true'; search.setAttribute('aria-label', placeholder);
@@ -490,8 +565,9 @@ export class IssuesView extends ItemView {
       this.mobileSearch('搜索项目');
     } else {
       const head = el(root, 'div', 'li-heading'); el(head, 'h2', '', '项目'); el(head, 'span', 'li-muted', `${this.data.projects.length} 个项目`); const actions = el(head, 'div', 'li-heading-actions'); if (!Platform.isMobile) action(actions, '复制仓库链接', () => safe(async () => { await navigator.clipboard.writeText(await this.host.resourceLink()); new Notice('已复制仓库链接'); }), '', 'link'); action(actions, '新建项目', () => this.projectModal(), 'mod-cta', 'plus');
-      const searchRow = el(root, 'div', 'li-search-row'); const search = input(searchRow, '搜索项目', this.query); search.setAttribute('aria-label', '搜索项目'); search.addEventListener('change', () => { this.query = search.value; safe(() => this.draw()); }); search.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); this.query = search.value; safe(() => this.draw()); } });
-      const tools = el(root, 'div', 'li-toolbar');
+      const workbar = el(root, 'div', 'li-workbar li-project-workbar');
+      this.desktopSearch(workbar, '搜索项目');
+      const tools = el(workbar, 'div', 'li-toolbar');
       select(tools, [['', '所有状态'], ...PROJECT_STATES.map(s => [s, STATUS_NAMES[s]] as [string, string])], this.state, value => { this.state = value; safe(() => this.draw()); });
       select(tools, [['updated', '最近更新'], ['manual', '手动排序'], ['title', '项目名称'], ['due', '截止日期']], this.projectSort, value => safe(async () => { this.projectSort = value; await this.writeLayout({ projectSort: value }); await this.draw(); }));
       select(tools, [['', '不分组'], ['status', '按状态分组']], this.group, value => { this.group = value; safe(() => this.draw()); });
@@ -524,7 +600,7 @@ export class IssuesView extends ItemView {
     for (const group of groupedProjects) {
       if (group.status) { const cell = el(el(body, 'tr', 'li-group'), 'td', '', STATUS_NAMES[group.status as ProjectStatus]); cell.colSpan = 7; cell.dataset.projectGroup = group.status; }
       for (const project of group.projects) {
-        const row = el(body, 'tr'); this.shareContextMenu(row, project.id, '项目'); this.projectDragHandle(el(row, 'td', 'li-project-handle-cell'), row, project, projects); const name = el(row, 'td'); action(name, project.title, () => safe(() => this.navigate(project.id)), 'li-project-title'); if (project.description) el(name, 'div', 'li-muted li-truncate', project.description.split('\n')[0]);
+        const row = el(body, 'tr'); this.shareContextMenu(row, project.id, '项目'); this.tapCard(row, () => this.navigate(project.id)); this.projectDragHandle(el(row, 'td', 'li-project-handle-cell'), row, project, projects); const name = el(row, 'td'); action(name, project.title, () => safe(() => this.navigate(project.id)), 'li-project-title'); if (project.description) el(name, 'div', 'li-muted li-truncate', project.description.split('\n')[0]);
         const issues = this.data.issues.filter(i => i.projectId === project.id); const done = issues.filter(i => i.status === 'closed').length; const percent = issues.length ? Math.round(done / issues.length * 100) : 0;
         const progressCell = el(row, 'td'); const progress = el(progressCell, 'progress'); progress.max = 100; progress.value = percent; progress.setAttribute('aria-label', `${project.title} 完成 ${percent}%`); el(progressCell, 'span', 'li-muted', ` ${percent}%`);
         el(row, 'td', '', `${done}/${issues.length}`); pill(el(row, 'td'), project.status); el(row, 'td', 'li-muted', project.dueDate || '—'); action(el(row, 'td'), '编辑', () => this.projectModal(project), 'li-subtle');
@@ -596,40 +672,80 @@ export class IssuesView extends ItemView {
     ], '项目更多操作');
     const create = action(actions, this.phone ? '新建' : '新建 Issue', () => this.issueModal(project), 'mod-cta', 'plus'); create.setAttribute('aria-label', '新建 Issue');
     const all = this.data.issues.filter(i => i.projectId === project.id); const labels = [...new Set(all.flatMap(i => i.labels))].sort(); const milestones = [...new Set(all.map(i => i.milestone).filter(Boolean))].sort();
+    const matching = all.filter(i => this.matches(i));
+    if (project.description) {
+      const about = el(root, 'details', this.phone ? 'li-mobile-about' : 'li-project-about');
+      el(about, 'summary', '', '项目说明');
+      this.markdown(about, project.description, project.path);
+    }
     if (this.phone) {
       this.mobileSearch('搜索 Issues', project);
-      if (project.description) { const about = el(root, 'details', 'li-mobile-about'); el(about, 'summary', '', '项目说明'); this.markdown(about, project.description, project.path); }
     } else {
-      if (project.description) this.markdown(root, project.description, project.path);
-      const tabs = el(root, 'div', 'li-tabs'); for (const [mode, title, icon] of [['list', 'Issues', 'circle-dot'], ['board', '看板', 'columns-3'], ['table', '表格', 'table']] as const) action(tabs, title, () => { this.mode = mode; safe(() => this.draw()); }, this.mode === mode ? 'li-tab is-active' : 'li-tab', icon);
-      const searchRow = el(root, 'div', 'li-search-row'); const search = input(searchRow, '搜索标题、描述、评论 · label:标签 state:open', this.query); search.setAttribute('aria-label', '搜索 Issues'); search.addEventListener('change', () => { this.query = search.value; safe(() => this.draw()); }); search.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); this.query = search.value; safe(() => this.draw()); } });
-      const filters = el(root, 'details', 'li-advanced-filters'); filters.open = !!(this.label || this.milestone);
-      el(filters, 'summary', '', `更多筛选${this.label || this.milestone ? ' · 已启用' : ''}`);
+      const workbar = el(root, 'div', 'li-workbar');
+      const tabs = el(workbar, 'div', 'li-tabs');
+      tabs.setAttribute('aria-label', '议题视图');
+      for (const [mode, title, icon] of [['list', 'Issues', 'circle-dot'], ['board', '看板', 'columns-3'], ['table', '表格', 'table']] as const) {
+        const tab = action(tabs, title, () => { this.mode = mode; safe(() => this.draw()); }, this.mode === mode ? 'li-tab is-active' : 'li-tab', icon);
+        tab.setAttribute('aria-pressed', String(this.mode === mode));
+      }
+      this.desktopSearch(workbar, '搜索议题', '搜索 Issues');
+      const filters = el(workbar, 'details', 'li-advanced-filters');
+      const toggle = el(filters, 'summary', '', '筛选与排序');
+      prependIcon(toggle, 'sliders-horizontal');
       const filterFields = el(filters, 'div', 'li-filter-grid');
-      select(this.field(filterFields, '标签'), [['', '所有标签'], ...labels.map(s => [s, s] as [string, string])], this.label, value => { this.label = value; safe(() => this.draw()); });
-      select(this.field(filterFields, '里程碑'), [['', '所有里程碑'], ...milestones.map(s => [s, s] as [string, string])], this.milestone, value => { this.milestone = value; safe(() => this.draw()); });
-      const tools = el(root, 'div', 'li-toolbar');
-      select(tools, [['updated', '最近更新'], ['created', '最早创建'], ['title', '标题'], ['due', '截止日期']], this.sort, value => { this.sort = value; safe(() => this.draw()); });
-      select(tools, [['', '不分组'], ['status', '按状态'], ['milestone', '按里程碑'], ['label', '按标签']], this.group, value => { this.group = value; safe(() => this.draw()); });
+      const update = (name: string, set: (value: string) => void) => (value: string) => safe(async () => {
+        set(value);
+        await this.draw();
+        const replacement = this.contentEl.querySelector<HTMLDetailsElement>('.li-advanced-filters');
+        if (!replacement) return;
+        replacement.open = true;
+        [...replacement.querySelectorAll('select')].find(control => control.getAttribute('aria-label') === name)?.focus({ preventScroll: true });
+      });
+      select(this.field(filterFields, '标签'), [['', '所有标签'], ...labels.map(s => [s, s] as [string, string])], this.label, update('标签', value => { this.label = value; }));
+      select(this.field(filterFields, '里程碑'), [['', '所有里程碑'], ...milestones.map(s => [s, s] as [string, string])], this.milestone, update('里程碑', value => { this.milestone = value; }));
+      select(this.field(filterFields, '排序'), [['updated', '最近更新'], ['created', '最早创建'], ['title', '标题'], ['due', '截止日期']], this.sort, update('排序', value => { this.sort = value; }));
+      select(this.field(filterFields, '分组'), [['', '不分组'], ['status', '按状态'], ['milestone', '按里程碑'], ['label', '按标签']], this.group, update('分组', value => { this.group = value; }));
     }
-    const matching = all.filter(i => this.matches(i));
     const filtered = matching.filter(i => this.mode === 'board' || (this.issueState === 'closed' ? i.status === 'closed' : i.status !== 'closed')).sort((a, b) => this.sort === 'title' ? a.title.localeCompare(b.title) : this.sort === 'created' ? a.createdAt.localeCompare(b.createdAt) : this.sort === 'due' ? (a.dueDate || '9999').localeCompare(b.dueDate || '9999') : b.updatedAt.localeCompare(a.updatedAt));
+    const facets: [string, () => void][] = [];
+    if (!this.phone && this.query) facets.push([`搜索：${this.query}`, () => { this.query = ''; }]);
+    if (!this.phone && this.label) facets.push([`标签：${this.label}`, () => { this.label = ''; }]);
+    if (!this.phone && this.milestone) facets.push([`里程碑：${this.milestone}`, () => { this.milestone = ''; }]);
+    if (facets.length) {
+      const active = el(root, 'div', 'li-active-filters');
+      for (const [label, reset] of facets) {
+        const remove = action(active, label, () => { reset(); safe(() => this.draw()); }, 'li-filter-chip', 'x');
+        remove.setAttribute('aria-label', `清除${label}`);
+      }
+    }
     if (this.mode !== 'board') {
-      const states = el(this.phone?.controls || root, 'div', 'li-state-tabs'); states.setAttribute('aria-label', 'Issue 状态');
+      const results = this.phone ? root : el(root, 'div', 'li-results-controls');
+      const states = el(this.phone?.controls || results, 'div', 'li-state-tabs'); states.setAttribute('aria-label', 'Issue 状态');
       for (const [state, label] of [['open', '开启'], ['closed', '已关闭']] as const) {
         const count = matching.filter(i => state === 'closed' ? i.status === 'closed' : i.status !== 'closed').length;
         const button = action(states, `${count} 个${label}`, () => { this.issueState = state; this.selected.clear(); safe(() => this.draw()); }, `li-state-tab${this.issueState === state ? ' is-active' : ''}`);
         prependIcon(button, state === 'open' ? 'circle-dot' : 'circle-check');
         button.setAttribute('aria-pressed', String(this.issueState === state));
       }
+      this.renderBatch(results, filtered, milestones, labels);
+    } else this.selected.clear();
+    if (!filtered.length && this.phone) {
+      const empty = el(root, 'div', 'li-empty');
+      el(empty, 'h3', '', !all.length ? '这个项目还没有 Issues' : this.issueState === 'closed' && !matching.some(i => i.status === 'closed') ? '没有已关闭的 Issues' : this.issueState === 'open' && !matching.some(i => i.status !== 'closed') ? '没有开启的 Issues' : '没有匹配的 Issues');
+      action(empty, '新建 Issue', () => this.issueModal(project), 'mod-cta', 'plus');
+      return;
     }
-
-    if (this.mode !== 'board') this.renderBatch(root, filtered, milestones, labels);
-    else this.selected.clear();
-    if (!filtered.length) { const empty = el(root, 'div', 'li-empty'); el(empty, 'h3', '', !all.length ? '这个项目还没有 Issues' : this.issueState === 'closed' && !matching.some(i => i.status === 'closed') ? '没有已关闭的 Issues' : this.issueState === 'open' && !matching.some(i => i.status !== 'closed') ? '没有开启的 Issues' : '没有匹配的 Issues'); action(empty, '新建 Issue', () => this.issueModal(project), 'mod-cta', 'plus'); return; }
+    if (!filtered.length && this.mode !== 'board') {
+      const empty = el(root, 'div', 'li-empty');
+      setIcon(el(empty, 'div', 'li-empty-icon'), facets.length ? 'search' : 'circle-dot');
+      el(empty, 'h3', '', !all.length ? '这个项目还没有议题' : facets.length ? '没有匹配的议题' : this.issueState === 'closed' ? '没有已关闭的议题' : '没有开启的议题');
+      if (facets.length) action(empty, '清除筛选', () => { facets.forEach(([, reset]) => reset()); safe(() => this.draw()); });
+      else if (this.issueState === 'open') action(empty, '新建 Issue', () => this.issueModal(project), 'mod-cta', 'plus');
+      return;
+    }
     if (this.mode === 'board') { const board = el(root, 'div', 'li-board'); for (const status of ISSUE_STATUSES) { const column = el(board, 'section', 'li-board-column'); const issues = filtered.filter(i => i.status === status); const header = el(column, 'div', 'li-board-header'); pill(header, status); el(header, 'span', 'li-muted', String(issues.length)); const add = action(header, '', () => this.issueModal(project, undefined, { status }), 'li-subtle li-icon-button', 'plus'); add.setAttribute('aria-label', `新建${STATUS_NAMES[status]} Issue`); add.title = `新建${STATUS_NAMES[status]} Issue`; column.addEventListener('dragover', event => { event.preventDefault(); column.addClass('is-dragover'); }); column.addEventListener('dragleave', () => column.removeClass('is-dragover')); column.addEventListener('drop', event => { event.preventDefault(); column.removeClass('is-dragover'); const id = event.dataTransfer?.getData('text/local-issues'); if (id) safe(async () => { await this.host.store.updateIssue(id, { status, actor: this.host.author }); await this.draw(); }); }); for (const issue of issues) this.issueCard(column, issue, true); } return; }
     const groups = new Map<string, Issue[]>(); for (const issue of filtered) { const key = this.group === 'status' ? STATUS_NAMES[issue.status] : this.group === 'milestone' ? issue.milestone || '无里程碑' : this.group === 'label' ? issue.labels[0] || '无标签' : ''; groups.set(key, [...(groups.get(key) || []), issue]); }
-    for (const [name, issues] of groups) { if (name) el(root, 'h3', 'li-section-heading', `${name} · ${issues.length}`); if (this.mode === 'table') { const table = el(root, 'table', 'li-table li-issues-table'); const th = el(el(table, 'thead'), 'tr'); for (const name of ['', 'Issue', '状态', '标签', '里程碑', '负责人', '截止']) el(th, 'th', '', name); const body = el(table, 'tbody'); for (const issue of issues) { const row = el(body, 'tr'); this.tapCard(row, () => this.navigate(project.id, issue.id)); this.shareContextMenu(row, issue.id, '议题'); this.checkbox(el(row, 'td'), issue); action(el(row, 'td'), `#${issue.number} ${issue.title}`, () => safe(() => this.navigate(project.id, issue.id)), 'li-issue-title'); pill(el(row, 'td'), issue.status, issue.closeReason); el(row, 'td', '', issue.labels.join('、') || '—'); el(row, 'td', '', issue.milestone || '—'); el(row, 'td', '', issue.assignees.join('、') || '—'); el(row, 'td', '', issue.dueDate || '—'); } } else { const list = el(root, 'div', 'li-issue-list'); for (const issue of issues) this.issueCard(list, issue); } }
+    for (const [name, issues] of groups) { if (name) el(root, 'h3', 'li-section-heading', `${name} · ${issues.length}`); if (this.mode === 'table') { const table = el(root, 'table', 'li-table li-issues-table'); const th = el(el(table, 'thead'), 'tr'); for (const name of ['', 'Issue', '状态', '标签', '里程碑', '负责人', '截止']) el(th, 'th', '', name); const body = el(table, 'tbody'); for (const issue of issues) { const row = el(body, 'tr'); row.dataset.issueRow = issue.id; this.tapCard(row, () => this.navigate(project.id, issue.id)); this.shareContextMenu(row, issue.id, '议题'); this.checkbox(el(row, 'td'), issue); action(el(row, 'td'), `#${issue.number} ${issue.title}`, () => safe(() => this.navigate(project.id, issue.id)), 'li-issue-title'); pill(el(row, 'td'), issue.status, issue.closeReason); el(row, 'td', '', issue.labels.join('、') || '—'); el(row, 'td', '', issue.milestone || '—'); el(row, 'td', '', issue.assignees.join('、') || '—'); el(row, 'td', '', issue.dueDate || '—'); } } else { const list = el(root, 'div', 'li-issue-list'); for (const issue of issues) this.issueCard(list, issue); } }
   }
   private renderBatch(root: HTMLElement, issues: Issue[], milestones: string[], labels: string[]) {
     const visible = new Set(issues.map(issue => issue.id));
@@ -681,7 +797,6 @@ export class IssuesView extends ItemView {
     } finally { this.batching = false; await this.draw(); }
   }
   private tapCard(card: HTMLElement, open: () => Promise<unknown>) {
-    if (!Platform.isMobile) return;
     card.addClass('li-tappable');
     card.addEventListener('click', event => {
       if (event.defaultPrevented || event.button !== 0) return;
@@ -709,11 +824,52 @@ export class IssuesView extends ItemView {
     return this.query.match(/(?:[^\s"]+|"[^"]*")+/g)?.every(token => { const [key, ...parts] = token.split(':'); const value = parts.join(':').replace(/^"|"$/g, ''); if (key === 'state' || key === 'is') return value === 'open' ? issue.status !== 'closed' : value === 'closed' ? issue.status === 'closed' : issue.status === value; if (key === 'label') return issue.labels.some(l => l.toLowerCase() === value.toLowerCase()); if (key === 'milestone') return issue.milestone.toLowerCase() === value.toLowerCase(); if (key === 'assignee') return issue.assignees.some(a => a.toLowerCase() === value.toLowerCase()); return text.includes(token.replace(/^"|"$/g, '').toLowerCase()); }) ?? true;
   }
   private checkbox(parent: HTMLElement, issue: Issue) { const target = Platform.isMobile ? el(parent, 'label', 'li-touch-checkbox') : parent; const checkbox = el(target, 'input'); checkbox.type = 'checkbox'; checkbox.checked = this.selected.has(issue.id); checkbox.setAttribute('aria-label', `选择 #${issue.number}`); checkbox.addEventListener('change', () => { checkbox.checked ? this.selected.add(issue.id) : this.selected.delete(issue.id); safe(() => this.draw()); }); }
-  private issueCard(parent: HTMLElement, issue: Issue, board = false) { const card = el(parent, 'div', board ? 'li-card' : 'li-issue-row'); this.tapCard(card, () => this.navigate(issue.projectId, issue.id)); this.shareContextMenu(card, issue.id, '议题'); if (board && !Platform.isMobile) { card.draggable = true; card.addEventListener('dragstart', event => event.dataTransfer?.setData('text/local-issues', issue.id)); } else if (!board) this.checkbox(card, issue); const content = el(card, 'div', 'li-issue-content'); const title = el(content, 'div', 'li-issue-title-row'); if (!board) pill(title, issue.status, issue.closeReason); action(title, issue.title, () => safe(() => this.navigate(issue.projectId, issue.id)), 'li-issue-title'); for (const label of issue.labels) el(title, 'span', 'li-label', label); const meta = el(content, 'div', 'li-muted li-issue-meta'); el(meta, 'span', '', `#${issue.number} · ${issue.author} · ${date(issue.updatedAt)}`); if (issue.milestone) { const milestone = el(meta, 'span', '', issue.milestone); prependIcon(milestone, 'milestone'); milestone.title = `里程碑：${issue.milestone}`; milestone.setAttribute('aria-label', milestone.title); } const comments = this.data.timeline.filter(e => e.issueId === issue.id && e.kind === 'comment').length; if (comments) { const count = el(meta, 'span', '', String(comments)); prependIcon(count, 'message-square'); count.title = `${comments} 条评论`; count.setAttribute('aria-label', count.title); } if (board) select(card, stateOptions, stateValue(issue), value => safe(async () => { await this.host.store.updateIssue(issue.id, { ...statePatch(value), actor: this.host.author }); await this.draw(); })); }
+  private issueCard(parent: HTMLElement, issue: Issue, board = false) {
+    const card: HTMLElement = el(parent, Platform.isMobile ? 'div' : 'article', board ? 'li-card' : 'li-issue-row');
+    card.dataset.issueRow = issue.id;
+    card.classList.toggle('is-selected', this.selected.has(issue.id));
+    this.tapCard(card, () => this.navigate(issue.projectId, issue.id));
+    this.shareContextMenu(card, issue.id, '议题');
+    if (board && !Platform.isMobile) {
+      card.draggable = true;
+      card.addEventListener('dragstart', event => event.dataTransfer?.setData('text/local-issues', issue.id));
+    } else if (!board) this.checkbox(card, issue);
+    const content = el(card, 'div', 'li-issue-content');
+    const title = el(content, 'div', 'li-issue-title-row');
+    const mobile = Platform.isMobile;
+    if (mobile && !board) pill(title, issue.status, issue.closeReason);
+    action(title, issue.title, () => safe(() => this.navigate(issue.projectId, issue.id)), 'li-issue-title');
+    const meta = el(content, 'div', 'li-muted li-issue-meta');
+    if (mobile) el(meta, 'span', '', `#${issue.number} · ${issue.author} · ${date(issue.updatedAt)}`);
+    else {
+      el(meta, 'span', 'li-issue-number', `#${issue.number}`);
+      if (!board) pill(meta, issue.status, issue.closeReason);
+      el(meta, 'span', '', issue.author);
+      el(meta, 'span', '', date(issue.updatedAt));
+    }
+    if (issue.milestone) {
+      const milestone = el(meta, 'span', '', issue.milestone);
+      prependIcon(milestone, 'milestone');
+      milestone.title = `里程碑：${issue.milestone}`;
+      milestone.setAttribute('aria-label', milestone.title);
+    }
+    const comments = this.data.timeline.filter(e => e.issueId === issue.id && e.kind === 'comment').length;
+    if (comments) {
+      const count = el(meta, 'span', '', String(comments));
+      prependIcon(count, 'message-square');
+      count.title = `${comments} 条评论`;
+      count.setAttribute('aria-label', count.title);
+    }
+    for (const label of issue.labels) el(mobile ? title : meta, 'span', 'li-label', label);
+    if (board) select(card, stateOptions, stateValue(issue), value => safe(async () => {
+      await this.host.store.updateIssue(issue.id, { ...statePatch(value), actor: this.host.author });
+      await this.draw();
+    })).setAttribute('aria-label', `修改 #${issue.number} 状态`);
+  }
   private renderIssue(root: HTMLElement, issue: Issue) {
     const project = this.data.projects.find(p => p.id === issue.projectId)!;
     const header = el(root, 'div', 'li-detail-header'); this.shareContextMenu(header, issue.id, '议题'); const title = el(header, 'div', 'li-detail-title');
-    const showTitle = () => { title.replaceChildren(); el(title, 'h1', '', issue.title); el(title, 'span', 'li-muted', `#${issue.number}`); const button = action(title, '编辑标题', () => safe(() => this.afterEditing(() => {
+    const showTitle = () => { title.replaceChildren(); el(title, 'h1', '', issue.title); if (this.phone) el(title, 'span', 'li-muted', `#${issue.number}`); const button = action(title, '编辑标题', () => safe(() => this.afterEditing(() => {
       title.replaceChildren();
       const field = input(title, '议题标题', issue.title); field.setAttribute('aria-label', '议题标题'); field.dataset.editor = 'true';
       const controls = el(title, 'div', 'li-inline-actions'); action(controls, '取消', () => { this.stopEditing(true); if (this.pending) safe(() => this.draw()); });
@@ -743,7 +899,9 @@ export class IssuesView extends ItemView {
         } else this.mobilePropertiesOpen = properties.open;
       });
     } else { sidebar = el(detail, 'aside', 'li-sidebar'); this.sidebarVisibility(detail, sidebar, controls); }
-    const description = el(main, 'article', 'li-comment li-description'); const descriptionHead = el(description, 'div', 'li-comment-header'); el(descriptionHead, 'strong', '', issue.author); el(descriptionHead, 'span', 'li-muted', '描述'); el(descriptionHead, 'div', 'li-spacer');
+    const description = el(main, 'article', 'li-comment li-description'); const descriptionHead = el(description, 'div', 'li-comment-header'); if (this.phone) { el(descriptionHead, 'strong', '', issue.author); el(descriptionHead, 'span', 'li-muted', '描述'); }
+    else el(descriptionHead, 'h3', '', '议题描述');
+    el(descriptionHead, 'div', 'li-spacer');
     const content = el(description, 'div', 'li-description-content'); this.markdown(content, issue.body, issue.path);
     const edit = action(descriptionHead, '编辑', () => safe(() => this.afterEditing(() => {
       edit.hidden = true; content.replaceChildren(); const text = this.editor(content, issue.body, issue.id, issue.path); const buttons = text.actions; const draft = this.cacheForm(text.element, `issue-body:${issue.id}`, issue.revision ?? issue.updatedAt);
@@ -753,7 +911,8 @@ export class IssuesView extends ItemView {
     })), 'li-subtle');
     const children = this.data.issues.filter(i => i.parent === issue.id); if (children.length) { const section = el(main, 'section', 'li-relations'); el(section, 'h3', '', `子议题 · ${children.filter(i => i.status === 'closed').length}/${children.length}`); for (const child of children) { const row = el(section, 'div', 'li-relation'); pill(row, child.status, child.closeReason); action(row, `#${child.number} ${child.title}`, () => safe(() => this.navigate(child.projectId, child.id)), 'li-subtle'); } }
     action(main, '添加子议题', () => this.issueModal(project, undefined, { parent: issue.id }), 'li-subtle', 'plus');
-    const timeline = el(main, 'div', 'li-timeline'); const entries = this.data.timeline.filter(e => e.issueId === issue.id).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    const timeline = el(main, this.phone ? 'div' : 'section', 'li-timeline'); const entries = this.data.timeline.filter(e => e.issueId === issue.id).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    if (!this.phone) { if (entries.length) el(timeline, 'h3', 'li-section-heading', '动态'); else timeline.hidden = true; }
     for (const entry of entries) { if (entry.kind === 'event') { const event = el(timeline, 'div', 'li-event'); pill(event, entry.to || 'open'); el(event, 'span', '', `${entry.author} ${entry.body}`); el(event, 'span', 'li-muted', date(entry.createdAt)); } else { const comment = el(timeline, 'article', 'li-comment'); comment.dataset.commentId = entry.id; const head = el(comment, 'div', 'li-comment-header'); el(head, 'strong', '', entry.author); el(head, 'span', 'li-muted', `${date(entry.createdAt)}${entry.updatedAt !== entry.createdAt ? ' · 已编辑' : ''}`); el(head, 'div', 'li-spacer'); const content = el(comment, 'div', 'li-description-content'); const edit = action(head, '编辑', () => safe(() => this.afterEditing(() => { edit.hidden = true; content.replaceChildren(); const text = this.editor(content, entry.body, issue.id, entry.path); const buttons = text.actions; const draft = this.cacheForm(text.element, `comment:${entry.id}`, entry.revision ?? entry.updatedAt); this.startEditing(text.element, `评论 · ${entry.author} · ${date(entry.createdAt)} · ${entry.body.replace(/\s+/g, ' ').slice(0, 40)}`, () => text.value !== entry.body || text.uploading, () => { text.destroy(); content.replaceChildren(); this.markdown(content, entry.body, entry.path); edit.hidden = false; }); action(buttons, '取消', () => { this.stopEditing(true); if (this.pending) safe(() => this.draw()); }); const save = action(buttons, '保存', () => safe(async () => { if (!text.value.trim()) throw new Error('评论不能为空'); if (text.uploading) throw new Error('附件正在保存，请稍后保存'); save.disabled = true; try { const submitted = draft.snapshot(); await this.host.store.editComment(entry.id, text.value, draft.revision); draft.complete(submitted); this.stopEditing(); await this.draw(); } finally { save.disabled = false; } }), 'mod-cta'); text.focus(); })), 'li-subtle'); action(head, '笔记', () => safe(() => this.host.openNote(entry.path)), 'li-subtle'); action(head, '删除', () => this.deleteComment(comment, entry), 'li-subtle li-delete-comment'); this.markdown(content, entry.body, entry.path); } }
     const compose = () => {
       const composer = el(main, 'section', 'li-composer'); el(composer, 'h3', '', '发表评论'); const editor = this.editor(composer, this.drafts.get(issue.id) || '', issue.id, issue.path, value => this.drafts.set(issue.id, value), () => this.host.commentSubmit === 'enter'); const status = el(editor.element, 'div', 'li-composer-status'); status.setAttribute('role', 'status'); const footer = editor.actions;
@@ -864,7 +1023,7 @@ export class IssuesView extends ItemView {
       }
     };
     if (this.phone) action(this.phone.actions, this.drafts.get(issue.id) || this.draftCache.read(`new-comment:${issue.id}`) ? '继续评论' : '评论', () => safe(() => this.afterEditing(compose)), 'mod-cta'); else compose();
-    el(sidebar, 'h3', '', '属性'); const stateField = this.field(sidebar, '状态'); select(stateField, stateOptions, stateValue(issue), value => { const stateSelect = stateField.querySelector('select')!; stateSelect.value = stateValue(issue); safe(() => this.afterEditing(async () => { await this.host.store.updateIssue(issue.id, { ...statePatch(value), actor: this.host.author }, issue.revision ?? issue.updatedAt); await this.draw(); })); });
+    el(sidebar, 'h3', '', '属性'); const stateField = this.field(sidebar, '状态'); select(stateField, stateOptions, stateValue(issue), value => { const stateSelect = stateField.querySelector('select')!; stateSelect.value = stateValue(issue); safe(() => this.afterEditing(async () => { await this.host.store.updateIssue(issue.id, { ...statePatch(value), actor: this.host.author }); await this.draw(); })); });
     this.editableProperty(sidebar, issue, '标签', issue.labels.join('、'), (area, current) => {
       const field = this.listInput(area, '多个标签用逗号分隔', current.labels, this.data.issues.filter(i => i.projectId === issue.projectId).flatMap(i => i.labels));
       return () => ({ labels: words(field.value) });
